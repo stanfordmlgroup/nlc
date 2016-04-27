@@ -18,12 +18,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import gzip
 import os
 import re
-import tarfile
 
-from six.moves import urllib
 
 from tensorflow.python.platform import gfile
 
@@ -42,65 +39,6 @@ UNK_ID = 3
 # Regular expressions used to tokenize.
 _WORD_SPLIT = re.compile(b"([.,!?\"':;)(])")
 _DIGIT_RE = re.compile(br"\d")
-
-# URLs for WMT data.
-_NLC_TRAIN_URL = "http://neuron.stanford.edu/nlc/nlc-train.tar"
-_NLC_DEV_URL = "http://neuron.stanford.edu/nlc/nlc-valid.tar"
-
-
-def maybe_download(directory, filename, url):
-  """Download filename from url unless it's already in directory."""
-  if not os.path.exists(directory):
-    print("Creating directory %s" % directory)
-    os.mkdir(directory)
-  filepath = os.path.join(directory, filename)
-  if not os.path.exists(filepath):
-    print("Downloading %s to %s" % (url, filepath))
-    filepath, _ = urllib.request.urlretrieve(url, filepath)
-    statinfo = os.stat(filepath)
-    print("Succesfully downloaded", filename, statinfo.st_size, "bytes")
-  return filepath
-
-
-def gunzip_file(gz_path, new_path):
-  """Unzips from gz_path into new_path."""
-  print("Unpacking %s to %s" % (gz_path, new_path))
-  with gzip.open(gz_path, "rb") as gz_file:
-    with open(new_path, "wb") as new_file:
-      for line in gz_file:
-        new_file.write(line)
-
-
-def get_nlc_train_set(directory):
-  """Download the NLC training corpus to directory unless it's there."""
-  train_path = os.path.join(directory, "train")
-  print (train_path + ".x.txt")
-  print (train_path + ".y.txt")
-  if not (gfile.Exists(train_path +".x.txt") and gfile.Exists(train_path +".y.txt")):
-    corpus_file = maybe_download(directory, "nlc-train.tar",
-                                 _NLC_TRAIN_URL)
-    print("Extracting tar file %s" % corpus_file)
-    with tarfile.open(corpus_file, "r") as corpus_tar:
-      corpus_tar.extractall(directory)
-  return train_path
-
-
-def get_nlc_dev_set(directory):
-  """Download the NLC training corpus to directory unless it's there."""
-  dev_name = "valid"
-  dev_path = os.path.join(directory, dev_name)
-  if not (gfile.Exists(dev_path + ".y.txt") and gfile.Exists(dev_path + ".x.txt")):
-    dev_file = maybe_download(directory, "nlc-valid.tar", _NLC_DEV_URL)
-    print("Extracting tgz file %s" % dev_file)
-    with tarfile.open(dev_file, "r") as dev_tar:
-      y_dev_file = dev_tar.getmember(dev_name + ".y.txt")
-      x_dev_file = dev_tar.getmember(dev_name + ".x.txt")
-      y_dev_file.name = dev_name + ".y.txt"  # Extract without "dev/" prefix.
-      x_dev_file.name = dev_name + ".x.txt"
-      dev_tar.extract(y_dev_file, directory)
-      dev_tar.extract(x_dev_file, directory)
-  return dev_path
-
 
 def basic_tokenizer(sentence):
   """Very basic tokenizer: split the sentence into a list of tokens."""
@@ -244,6 +182,16 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
                                             normalize_digits)
           tokens_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
 
+def maybe_download_lang8_data(lang8_dir):
+  #TODO download if missing
+  # import process_lang8
+  # process_lang8.process_data(lang8_dir, 'train', 0.01)
+  # process_lang8.process_data(lang8_dir, 'test')
+  train_path = os.path.join(lang8_dir, 'entries.train')
+  dev_path = os.path.join(lang8_dir, 'entries.dev')
+  test_path = os.path.join(lang8_dir, 'entries.test')
+  return train_path, dev_path, test_path
+
 
 def prepare_nlc_data(data_dir, x_vocabulary_size, y_vocabulary_size, tokenizer=char_tokenizer):
   """Get NLC data into data_dir, create vocabularies and tokenize data.
@@ -265,27 +213,28 @@ def prepare_nlc_data(data_dir, x_vocabulary_size, y_vocabulary_size, tokenizer=c
       (6) path to the French vocabulary file.
   """
   # Get nlc data to the specified directory.
-  train_path = get_nlc_train_set(data_dir)
-  dev_path = get_nlc_dev_set(data_dir)
+  train_path, dev_path, _ = maybe_download_lang8_data(data_dir)
 
   # Create vocabularies of the appropriate sizes.
-  y_vocab_path = os.path.join(data_dir, "vocab%d.y" % y_vocabulary_size)
-  x_vocab_path = os.path.join(data_dir, "vocab%d.x" % x_vocabulary_size)
-  create_vocabulary(y_vocab_path, train_path + ".y.txt", y_vocabulary_size, tokenizer)
-  create_vocabulary(x_vocab_path, train_path + ".x.txt", x_vocabulary_size, tokenizer)
+  y_vocab_path = os.path.join(data_dir, "vocab%d.corrected" % y_vocabulary_size)
+  x_vocab_path = os.path.join(data_dir, "vocab%d.original" % x_vocabulary_size)
+  create_vocabulary(y_vocab_path, train_path + ".corrected", y_vocabulary_size, tokenizer)
+  create_vocabulary(x_vocab_path, train_path + ".original", x_vocabulary_size, tokenizer)
 
   # Create token ids for the training data.
-  y_train_ids_path = train_path + (".ids%d.y" % y_vocabulary_size)
-  x_train_ids_path = train_path + (".ids%d.x" % x_vocabulary_size)
-  data_to_token_ids(train_path + ".y.txt", y_train_ids_path, y_vocab_path, tokenizer)
-  data_to_token_ids(train_path + ".x.txt", x_train_ids_path, x_vocab_path, tokenizer)
+  y_train_ids_path = train_path + (".ids%d.corrected" % y_vocabulary_size)
+  x_train_ids_path = train_path + (".ids%d.original" % x_vocabulary_size)
+  data_to_token_ids(train_path + ".corrected", y_train_ids_path, y_vocab_path, tokenizer)
+  data_to_token_ids(train_path + ".original", x_train_ids_path, x_vocab_path, tokenizer)
 
   # Create token ids for the development data.
-  y_dev_ids_path = dev_path + (".ids%d.y" % y_vocabulary_size)
-  x_dev_ids_path = dev_path + (".ids%d.x" % x_vocabulary_size)
-  data_to_token_ids(dev_path + ".y.txt", y_dev_ids_path, y_vocab_path, tokenizer)
-  data_to_token_ids(dev_path + ".x.txt", x_dev_ids_path, x_vocab_path, tokenizer)
+  y_dev_ids_path = dev_path + (".ids%d.corrected" % y_vocabulary_size)
+  x_dev_ids_path = dev_path + (".ids%d.original" % x_vocabulary_size)
+  data_to_token_ids(dev_path + ".corrected", y_dev_ids_path, y_vocab_path, tokenizer)
+  data_to_token_ids(dev_path + ".original", x_dev_ids_path, x_vocab_path, tokenizer)
 
   return (x_train_ids_path, y_train_ids_path,
           x_dev_ids_path, y_dev_ids_path,
           x_vocab_path, y_vocab_path)
+
+
