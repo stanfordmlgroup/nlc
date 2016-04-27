@@ -18,12 +18,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import gzip
 import os
 import re
-import tarfile
 
-from six.moves import urllib
 
 from tensorflow.python.platform import gfile
 
@@ -42,65 +39,6 @@ UNK_ID = 3
 # Regular expressions used to tokenize.
 _WORD_SPLIT = re.compile(b"([.,!?\"':;)(])")
 _DIGIT_RE = re.compile(br"\d")
-
-# URLs for WMT data.
-_NLC_TRAIN_URL = "http://neuron.stanford.edu/nlc/nlc-train.tar"
-_NLC_DEV_URL = "http://neuron.stanford.edu/nlc/nlc-valid.tar"
-
-
-def maybe_download(directory, filename, url):
-  """Download filename from url unless it's already in directory."""
-  if not os.path.exists(directory):
-    print("Creating directory %s" % directory)
-    os.mkdir(directory)
-  filepath = os.path.join(directory, filename)
-  if not os.path.exists(filepath):
-    print("Downloading %s to %s" % (url, filepath))
-    filepath, _ = urllib.request.urlretrieve(url, filepath)
-    statinfo = os.stat(filepath)
-    print("Succesfully downloaded", filename, statinfo.st_size, "bytes")
-  return filepath
-
-
-def gunzip_file(gz_path, new_path):
-  """Unzips from gz_path into new_path."""
-  print("Unpacking %s to %s" % (gz_path, new_path))
-  with gzip.open(gz_path, "rb") as gz_file:
-    with open(new_path, "wb") as new_file:
-      for line in gz_file:
-        new_file.write(line)
-
-
-def get_nlc_train_set(directory):
-  """Download the NLC training corpus to directory unless it's there."""
-  train_path = os.path.join(directory, "train")
-  print (train_path + ".x.txt")
-  print (train_path + ".y.txt")
-  if not (gfile.Exists(train_path +".x.txt") and gfile.Exists(train_path +".y.txt")):
-    corpus_file = maybe_download(directory, "nlc-train.tar",
-                                 _NLC_TRAIN_URL)
-    print("Extracting tar file %s" % corpus_file)
-    with tarfile.open(corpus_file, "r") as corpus_tar:
-      corpus_tar.extractall(directory)
-  return train_path
-
-
-def get_nlc_dev_set(directory):
-  """Download the NLC training corpus to directory unless it's there."""
-  dev_name = "valid"
-  dev_path = os.path.join(directory, dev_name)
-  if not (gfile.Exists(dev_path + ".y.txt") and gfile.Exists(dev_path + ".x.txt")):
-    dev_file = maybe_download(directory, "nlc-valid.tar", _NLC_DEV_URL)
-    print("Extracting tgz file %s" % dev_file)
-    with tarfile.open(dev_file, "r") as dev_tar:
-      y_dev_file = dev_tar.getmember(dev_name + ".y.txt")
-      x_dev_file = dev_tar.getmember(dev_name + ".x.txt")
-      y_dev_file.name = dev_name + ".y.txt"  # Extract without "dev/" prefix.
-      x_dev_file.name = dev_name + ".x.txt"
-      dev_tar.extract(y_dev_file, directory)
-      dev_tar.extract(x_dev_file, directory)
-  return dev_path
-
 
 def basic_tokenizer(sentence):
   """Very basic tokenizer: split the sentence into a list of tokens."""
@@ -265,8 +203,8 @@ def prepare_nlc_data(data_dir, x_vocabulary_size, y_vocabulary_size, tokenizer=c
       (6) path to the French vocabulary file.
   """
   # Get nlc data to the specified directory.
-  train_path = get_nlc_train_set(data_dir)
-  dev_path = get_nlc_dev_set(data_dir)
+  train_path = os.path.join(data_dir, 'train')
+  dev_path = os.path.join(data_dir, 'dev')
 
   # Create vocabularies of the appropriate sizes.
   y_vocab_path = os.path.join(data_dir, "vocab%d.y" % y_vocabulary_size)
