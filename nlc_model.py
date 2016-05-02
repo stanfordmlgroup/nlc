@@ -27,9 +27,33 @@ from tensorflow.python.framework import ops
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import embedding_ops
 from tensorflow.python.ops import rnn
+from tensorflow.python.ops import rnn_cell
 from tensorflow.python.ops import variable_scope as vs
+from tensorflow.python.ops.math_ops import sigmoid
+from tensorflow.python.ops.math_ops import tanh
 
 import nlc_data
+
+class GRUCellAttn(rnn_cell.GRUCell):
+  def __init__(self, num_units, encoder_output, scope=None):
+    self.hs = encoder_output
+    with vs.variable_scope(scope or type(self).__name__):
+      with vs.variable_scope("Attn1"):
+        self.phi_hs = tanh(rnn_cell.linear(self.hs, num_units, True, 1.0))
+    super(GRUCellAttn, self).__init__(num_units)
+
+  def __call__(self, inputs, state, scope=None):
+    gru_out, gru_state = super(GRUCellAttn, self).__call__(inputs, state, scope)
+    with vs.variable_scope(scope or type(self).__name__):
+      with vs.variable_scope("Attn2"):
+        gamma_h = tanh(rnn_cell.linear(gru_out, self._num_units, True, 1.0))
+      weights = tf.reduce_sum(self.phi_hs * gamma_h, reduction_indices=2, keep_dims=True)
+      weights = tf.exp(weights - tf.reduce_max(weights, reduction_indices=0, keep_dims=True))
+      weights = weights / (1e-6 + tf.reduce_sum(weights, reduction_indices=0, keep_dims=True))
+      context = tf.reduce_sum(self.hs * weights, reduction_indices=0)
+      with vs.variable_scope("AttnConcat"):
+        out = tf.relu(rnn_cell.linear([context, gru_out], self._num_units, True, 1.0))
+      return (out, tf.slice(weights, [0, 0, 0], [-1, -1, 1]))
 
 class NLCModel(object):
   def __init__(self, vocab_size, size, num_layers, max_gradient_norm, batch_size, learning_rate,
@@ -42,18 +66,16 @@ class NLCModel(object):
     self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
     self.global_step = tf.Variable(0, trainable=False)
 
-    # Use MultiRNNCell for now. (Later: change inner loop to be along timestep dimension, makes pyramid easy)
-    cell = tf.nn.rnn_cell.GRUCell(size)
-    self.cell = tf.nn.rnn_cell.MultiRNNCell([cell] * num_layers)
-
-    self.encoder_tokens = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="encoder_tokens")
-    self.decoder_tokens = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="decoder_tokens")
-    self.targets        = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="targets")
-    self.target_weights = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="weights")
+    self.source_tokens = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="source_tokens")
+    self.target_tokens = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="target_tokens")
+    self.source_mask = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="source_mask")
+    self.target_mask = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="target_mask")
+    self.sequence_length = None
 
     self.setup_embeddings()
-
-    self.outputs, self.losses = self.create_output_losses(forward_only)
+    self.setup_encoder()
+    self.setup_decoder()
+    self.setup_loss()
 
     # Gradients and SGD update operation for training the model.
     params = tf.trainable_variables()
@@ -72,19 +94,20 @@ class NLCModel(object):
     with vs.variable_scope("embeddings"):
       self.L_enc = tf.get_variable("L_enc", [self.vocab_size, self.size])
       self.L_dec = tf.get_variable("L_dec", [self.vocab_size, self.size])
-      self.encoder_inputs = embedding_ops.embedding_lookup(self.L_enc, self.encoder_tokens)
-      self.decoder_inputs = embedding_ops.embedding_lookup(self.L_dec, self.decoder_tokens)
+      self.encoder_inputs = embedding_ops.embedding_lookup(self.L_enc, self.source_tokens)
+      self.decoder_inputs = embedding_ops.embedding_lookup(self.L_dec, self.target_tokens)
 
-  def create_output_losses(self, forward_only):
-    all_inputs = [self.encoder_inputs, self.decoder_inputs, self.targets, self.target_weights]
-    with ops.op_scope(all_inputs, None, "seq2seq_dynamic_model"):
-      outputs, _ = self.enc_dec_attn(forward_only)
+  def setup_encoder(self):
+    self.encoder_cell = rnn_cell.GRUCell(self.size)
+    self.encoder_output, self.encoder_hidden = self.bidirectional_rnn(self.encoder_cell, self.encoder_inputs)
 
-      losses = tf.nn.seq2seq.sequence_loss(outputs[-1], self.targets, self.target_weights,
-                                           average_across_batch=True,
-                                           average_across_timesteps=False)
-      return outputs, losses
-
+  def setup_decoder(self):
+    self.decoder_cell = GRUCellAttn(self.size, self.encoder_hidden, scope=None)
+    self.decoder_output, self.decoder_hidden = rnn.dynamic_rnn(self.decoder_cell, self.decoder_inputs, time_major=True,
+                                                               dtype=dtypes.float32, sequence_length=self.sequence_length,
+                                                               scope=None)
+  def setup_loss(self):
+    pass
 
   def bidirectional_rnn(self, cell, inputs, sequence_length=None):
     name = "BiRNN"
@@ -105,24 +128,6 @@ class NLCModel(object):
     output_state = output_state_fw + 0 #output_state_bw
 
     return (outputs, output_state)
-
-  def enc_dec_attn(self, forward_only):
-    with vs.variable_scope("embedding_attention_seq2seq"):
-      # Encoder.
-      encoder_outputs, encoder_state = self.bidirectional_rnn(self.cell, self.encoder_inputs)
-
-      # Attention.
-      attention_states = tf.transpose(encoder_outputs, perm=[1, 0, 2]) # [batch_size x TIME x dim]
-
-      # Decoder.
-      output_size = self.vocab_size
-      decoder_cell = tf.nn.rnn_cell.OutputProjectionWrapper(self.cell, output_size)
-
-      return tf.nn.seq2seq.embedding_attention_decoder(self.decoder_inputs, encoder_state, attention_states,
-                                                       decoder_cell, self.vocab_size, self.size, num_heads=1,
-                                                       output_size=output_size, output_projection=None,
-                                                       feed_previous=forward_only,
-                                                       initial_state_attention=False)
 
   def train(self, session, encoder_inputs, decoder_inputs, targets, target_weights):
     input_feed = {}
