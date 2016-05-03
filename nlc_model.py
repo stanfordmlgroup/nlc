@@ -32,7 +32,6 @@ from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops.math_ops import sigmoid
 from tensorflow.python.ops.math_ops import tanh
 
-import nlc_data
 
 class GRUCellAttn(rnn_cell.GRUCell):
   def __init__(self, num_units, encoder_output, scope=None):
@@ -60,11 +59,13 @@ class GRUCellAttn(rnn_cell.GRUCell):
 
 class NLCModel(object):
   def __init__(self, vocab_size, size, num_layers, max_gradient_norm, batch_size, learning_rate,
-               learning_rate_decay_factor, forward_only=False):
+               learning_rate_decay_factor, dropout, forward_only=False):
 
     self.size = size
     self.vocab_size = vocab_size
     self.batch_size = batch_size
+    self.num_layers = num_layers
+    self.keep_prob = 1.0 - dropout
     self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
     self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
     self.global_step = tf.Variable(0, trainable=False)
@@ -82,6 +83,7 @@ class NLCModel(object):
     self.setup_loss()
 
     # Gradients and SGD update operation for training the model.
+    # TODO: adam optimizer
     params = tf.trainable_variables()
     if not forward_only:
       opt = tf.train.GradientDescentOptimizer(self.learning_rate)
@@ -102,16 +104,38 @@ class NLCModel(object):
       self.decoder_inputs = embedding_ops.embedding_lookup(self.L_dec, self.target_tokens)
 
   def setup_encoder(self):
-    # TODO: make multi-layer
+    # TODO: add pyramid
     self.encoder_cell = rnn_cell.GRUCell(self.size)
-    self.encoder_output, self.encoder_hidden = self.bidirectional_rnn(self.encoder_cell, self.encoder_inputs)
+    with vs.variable_scope("PryamidEncoder"):
+      inp = self.encoder_inputs
+      out = None
+      for i in xrange(self.num_layers):
+        with vs.variable_scope("EncoderCell%d" % i) as scope:
+          out, _ = self.bidirectional_rnn(self.encoder_cell, self.dropout(inp), scope=scope)
+          inp = out
+      self.encoder_output = out
 
   def setup_decoder(self):
-    # TODO: make multi-layer
-    self.decoder_cell = GRUCellAttn(self.size, self.encoder_output, scope=None)
-    self.decoder_output, self.decoder_hidden = rnn.dynamic_rnn(self.decoder_cell, self.decoder_inputs, time_major=True,
-                                                               dtype=dtypes.float32, sequence_length=self.target_length,
-                                                               scope=None)
+    if self.num_layers > 1:
+      self.decoder_cell = rnn_cell.GRUCell(self.size)
+    self.attn_cell = GRUCellAttn(self.size, self.encoder_output, scope="DecoderAttnCell")
+
+    out = self.decoder_inputs
+
+    with vs.variable_scope("Decoder"):
+      inp = self.decoder_inputs
+      for i in xrange(self.num_layers - 1):
+        with vs.variable_scope("DecoderCell%d" % i) as scope:
+          out, _ = rnn.dynamic_rnn(self.decoder_cell, self.dropout(inp), time_major=True,
+                                   dtype=dtypes.float32, sequence_length=self.target_length,
+                                   scope=scope)
+          inp = out
+      with vs.variable_scope("DecoderAttnCell") as scope:
+        out, _ = rnn.dynamic_rnn(self.attn_cell, self.dropout(inp), time_major=True,
+                                 dtype=dtypes.float32, sequence_length=self.target_length,
+                                 scope=scope)
+        self.decoder_output = out
+
   def setup_loss(self):
     with vs.variable_scope("logistic"):
       do2d = tf.reshape(self.decoder_output, [-1, self.size])
@@ -128,23 +152,23 @@ class NLCModel(object):
       losses2d = tf.reshape(losses1d, [-1, self.batch_size])
       self.losses = tf.reduce_sum(losses2d) / self.batch_size
 
-  def bidirectional_rnn(self, cell, inputs):
-    name = "BiRNN"
+  def dropout(self, inp):
+    return tf.nn.dropout(inp, self.keep_prob)
+
+  def bidirectional_rnn(self, cell, inputs, scope=None):
+    name = scope.name or "BiRNN"
     # Forward direction
     with vs.variable_scope(name + "_FW") as fw_scope:
       output_fw, output_state_fw = rnn.dynamic_rnn(cell, inputs, time_major=True, dtype=dtypes.float32,
                                                    sequence_length=self.source_length, scope=fw_scope)
-
-    # TODO implement _reverse_seq on Tensor
     # Backward direction
-#    with vs.variable_scope(name + "_BW") as bw_scope:
-#      tmp, output_state_bw = rnn.dynamic_rnn(cell, rnn._reverse_seq(inputs, sequence_length),
-#                                             time_major=True, dtype=dtypes.float32,
-#                                             sequence_length=sequence_length, scope=bw_scope)
-    output_bw = 0 #rnn._reverse_seq(tmp, sequence_length)
+    with vs.variable_scope(name + "_BW") as bw_scope:
+      output_bw, output_state_bw = rnn.dynamic_rnn(cell, inputs, time_major=True, dtype=dtypes.float32,
+                                                   sequence_length=self.source_length, scope=bw_scope)
+    output_bw = tf.reverse_sequence(output_bw, tf.to_int64(self.source_length), seq_dim=0, batch_dim=1)
 
     outputs = output_fw + output_bw
-    output_state = output_state_fw + 0 #output_state_bw
+    output_state = output_state_fw + output_state_bw
 
     return (outputs, output_state)
 

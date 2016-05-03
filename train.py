@@ -46,6 +46,7 @@ tf.app.flags.DEFINE_string("tokenizer", "CHAR", "Set to WORD to train word level
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
+tf.app.flags.DEFINE_float("dropout", 0.05, "What percentage to dropout.")
 tf.app.flags.DEFINE_integer("steps_per_checkpoint", 200,
                             "How many training steps to do per checkpoint.")
 
@@ -74,7 +75,6 @@ def get_batch(data, batch_size):
 
     # Now we create batch-major vectors from the data selected above.
     batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
-    batch_targets = [] # decoder_inputs [- GO] [+ 0 end]
 
     # Batch encoder inputs are just re-indexed encoder_inputs.
     for length_idx in xrange(encoder_size):
@@ -126,7 +126,7 @@ def read_data(source_path, target_path, max_size=None):
 def create_model(session, forward_only):
   model = nlc_model.NLCModel(
       FLAGS.vocab_size, FLAGS.size, FLAGS.num_layers, FLAGS.max_gradient_norm, FLAGS.batch_size,
-      FLAGS.learning_rate, FLAGS.learning_rate_decay_factor,
+      FLAGS.learning_rate, FLAGS.learning_rate_decay_factor, FLAGS.dropout,
       forward_only=forward_only)
   ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
   if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
