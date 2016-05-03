@@ -30,98 +30,79 @@ import tensorflow as tf
 import nlc_model
 import nlc_data
 
-tf.app.flags.DEFINE_float("learning_rate", 0.5, "Learning rate.")
-tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99,
-                          "Learning rate decays by this much.")
-tf.app.flags.DEFINE_float("max_gradient_norm", 5.0,
-                          "Clip gradients to this norm.")
-tf.app.flags.DEFINE_integer("batch_size", 64,
-                            "Batch size to use during training.")
-tf.app.flags.DEFINE_integer("size", 1024, "Size of each model layer.")
+tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99, "Learning rate decays by this much.")
+tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
+tf.app.flags.DEFINE_float("dropout", 0.0, "Fraction of units randomly dropped on non-recurrent connections.")
+tf.app.flags.DEFINE_integer("batch_size", 128, "Batch size to use during training.")
+tf.app.flags.DEFINE_integer("epochs", 0, "Number of epochs to train.")
+tf.app.flags.DEFINE_integer("size", 400, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 3, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("vocab_size", 40000, "Vocabulary size for word model.")
+tf.app.flags.DEFINE_integer("vocab_size", 400, "Vocabulary size for word model.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
 tf.app.flags.DEFINE_string("tokenizer", "CHAR", "Set to WORD to train word level model.")
-tf.app.flags.DEFINE_integer("max_train_data_size", 0,
-                            "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
-tf.app.flags.DEFINE_float("dropout", 0.05, "What percentage to dropout.")
-tf.app.flags.DEFINE_integer("steps_per_checkpoint", 200,
-                            "How many training steps to do per checkpoint.")
 
 FLAGS = tf.app.flags.FLAGS
 
-def get_batch(data, batch_size):
-  if True:
-    encoder_size, decoder_size = 0, 0
-    encoder_inputs, decoder_inputs = [], []
-    sequence_length = []
+class PairIter:
+  def __init__(self, fnamex, fnamey, batch_size, num_layers):
+    self.fdx, self.fdy = open(fnamex), open(fnamey)
+    self.batch_size = batch_size
+    self.num_layers = num_layers
+    self.batches = []
 
-    # Get a random batch of encoder and decoder inputs from data,
-    # pad them if needed, reverse encoder inputs and add GO to decoder.
-    for _ in xrange(batch_size):
-      encoder_input, decoder_input = random.choice(data[bucket_id])
+  def __iter__(self):
+    return self
 
-      # Encoder inputs are padded and then reversed.
-      encoder_pad = [nlc_data.PAD_ID] * (encoder_size - len(encoder_input))
-      encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
-      sequence_length.append(len(encoder_input))
+  def refill(self):
+    line_pairs = []
+    linex, liney = self.fdx.readline(), self.fdy.readline()
 
-      # Decoder inputs get an extra "GO" symbol, and are padded then.
-      decoder_pad_size = decoder_size - len(decoder_input) - 1
-      decoder_inputs.append([nlc_data.GO_ID] + decoder_input +
-                            [nlc_data.PAD_ID] * decoder_pad_size)
+    while linex and liney:
+      line_pairs.append((linex, liney))
+      if len(line_pairs) == self.batch_size * 16:
+        break
+      linex, liney = self.fdx.readline(), self.fdy.readline()
 
-    # Now we create batch-major vectors from the data selected above.
-    batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
+    line_pairs.sort(lambda x, y: len(x))
 
-    # Batch encoder inputs are just re-indexed encoder_inputs.
-    for length_idx in xrange(encoder_size):
-      batch_encoder_inputs.append(
-          np.array([encoder_inputs[batch_idx][length_idx]
-                    for batch_idx in xrange(batch_size)], dtype=np.int32))
+    for batch_start in xrange(0, len(line_pairs), int(len(line_pairs)/self.batch_size)):
+      x_batch, y_batch = zip(*line_pairs[batch_start:batch_start+self.batch_size])
+      if len(x_batch) < self.batch_size:
+        break
+      self.batches.append((x_batch, y_batch))
 
-    # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
-    for length_idx in xrange(decoder_size):
-      batch_decoder_inputs.append(
-          np.array([decoder_inputs[batch_idx][length_idx]
-                    for batch_idx in xrange(batch_size)], dtype=np.int32))
+  def next(self):
+    if len(self.batches) == 0:
+      self.refill()
+    if len(self.batches) == 0:
+      raise StopIteration()
 
-      # Create target_weights to be 0 for targets that are padding.
-      batch_weight = np.ones(batch_size, dtype=np.float32)
-      for batch_idx in xrange(batch_size):
-        # We set weight to 0 if the corresponding target is a PAD symbol.
-        # The corresponding target is decoder_input shifted by 1 forward.
-        if length_idx < decoder_size - 1:
-          target = decoder_inputs[batch_idx][length_idx + 1]
-        if length_idx == decoder_size - 1 or target == nlc_data.PAD_ID:
-          batch_weight[batch_idx] = 0.0
-      batch_weights.append(batch_weight)
-    return batch_encoder_inputs, batch_decoder_inputs, batch_weights, sequence_length
+    def tokenize(batch):
+      return map(lambda string: [int(s) for s in string.split()], batch)
 
-def read_data(source_path, target_path, max_size=None):
-  data_set = [[] for _ in _buckets]
-  with tf.gfile.GFile(source_path, mode="r") as source_file:
-    with tf.gfile.GFile(target_path, mode="r") as target_file:
-      source, target = source_file.readline(), target_file.readline()
-      counter = 0
-      while source and target and (not max_size or counter < max_size):
-        counter += 1
-        if counter % 100000 == 0:
-          print("  reading data line %d" % counter)
-          sys.stdout.flush()
-        source_ids = [int(x) for x in source.split()]
-        target_ids = [int(x) for x in target.split()]
-        target_ids.append(nlc_data.EOS_ID)
-        for bucket_id, (source_size, target_size) in enumerate(_buckets):
-          if len(source_ids) < source_size and len(target_ids) < target_size:
-            data_set[bucket_id].append([source_ids, target_ids])
-            break
-        source, target = source_file.readline(), target_file.readline()
-  print ("Data distribution in buckets: ", map(lambda x: len(x), data_set))
-  return data_set
+    def add_sos_eos(tokens):
+      return map(lambda token_list: [nlc_data.SOS_ID] + token_list + [nlc_data.EOS_ID], tokens)
 
+    def padded(tokens, depth):
+      maxlen = max(map(lambda x: len(x), tokens))
+      align = pow(2, depth - 1)
+      padlen = maxlen + (align - maxlen) % align
+      return map(lambda token_list: token_list + [nlc_data.PAD_ID] * (padlen - len(token_list)), tokens)
+
+    x_batch, y_batch = self.batches.pop(0)
+    x_tokens, y_tokens = tokenize(x_batch), tokenize(y_batch)
+    y_tokens = add_sos_eos(y_tokens)
+    x_padded, y_padded = padded(x_tokens, self.num_layers), padded(y_tokens, 1)
+
+    source_tokens = np.array(x_padded).T
+    source_mask = (source_tokens != nlc_data.PAD_ID).astype(np.int32)
+    target_tokens = np.array(y_padded).T
+    target_mask = (target_tokens != nlc_data.PAD_ID).astype(np.int32)
+
+    return source_tokens, source_mask, target_tokens, target_mask
 
 def create_model(session, forward_only):
   model = nlc_model.NLCModel(
@@ -142,100 +123,75 @@ def get_tokenizer(FLAGS):
   tokenizer = nlc_data.char_tokenizer if FLAGS.tokenizer.lower() == 'char' else nlc_data.basic_tokenizer
   return tokenizer
 
+
 def train():
   """Train a translation model using NLC data."""
   # Prepare NLC data.
   print("Preparing NLC data in %s" % FLAGS.data_dir)
 
-  en_train, fr_train, en_dev, fr_dev, _, _ = nlc_data.prepare_nlc_data(
+  x_train, y_train, x_dev, y_dev, _, _ = nlc_data.prepare_nlc_data(
     FLAGS.data_dir + '/' + FLAGS.tokenizer.lower(), FLAGS.vocab_size, FLAGS.vocab_size,
     tokenizer=get_tokenizer(FLAGS))
 
   with tf.Session() as sess:
-
-    # Create model.
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, False)
 
-    # Read data into buckets and compute their sizes.
-    print ("Reading development and training data (limit: %d)."
-           % FLAGS.max_train_data_size)
-    dev_set = read_data(en_dev, fr_dev)
-    train_set = read_data(en_train, fr_train, FLAGS.max_train_data_size)
-    train_bucket_sizes = [len(train_set[b]) for b in xrange(len(_buckets))]
-    train_total_size = float(sum(train_bucket_sizes))
+    epoch = 0
+    while (FLAGS.epochs == 0 or epoch < FLAGS.epochs):
+      epoch += 1
+      current_step = 0
+      exp_cost = None
+      exp_length = None
+      exp_norm = None
 
-    # A bucket scale is a list of increasing numbers from 0 to 1 that we'll use
-    # to select a bucket. Length of [scale[i], scale[i+1]] is proportional to
-    # the size if i-th training bucket, as used later.
-    train_buckets_scale = [sum(train_bucket_sizes[:i + 1]) / train_total_size
-                           for i in xrange(len(train_bucket_sizes))]
+      ## Train
+      for source_tokens, source_mask, target_tokens, target_mask in PairIter(x_train, y_train, FLAGS.batch_size, FLAGS.num_layers):
+        # Get a batch and make a step.
+        tic = time.time()
 
-    # This is the training loop.
-    step_time, loss = 0.0, 0.0
-    current_step = 0
-    previous_losses = []
-    print ("Buckets: %s" % str(train_bucket_sizes))
-    exp_cost = None
-    exp_length = None
+        _, grad_norm, cost = model.train(sess, source_tokens, source_mask, target_tokens, target_mask)
 
-    while True:
-      # Choose a bucket according to data distribution. We pick a random number
-      # in [0, 1] and use the corresponding interval in train_buckets_scale.
-      random_number_01 = np.random.random_sample()
-      bucket_id = min([i for i in xrange(len(train_buckets_scale))
-                       if train_buckets_scale[i] > random_number_01])
+        toc = time.time()
+        iter_time = toc - tic
+        current_step += 1
 
-      # Get a batch and make a step.
-      start_time = time.time()
-      encoder_inputs, decoder_inputs, target_weights, sequence_length = model.get_batch(
-          train_set, bucket_id)
-      grad_norm, step_loss = model.train(sess, encoder_inputs, decoder_inputs, target, target_weights)
+        lengths = np.sum(target_mask, axis=0)
+        mean_length = np.mean(lengths)
+        std_length = np.std(lengths)
 
-      iter_time = time.time() - start_time
-      step_time += iter_time / FLAGS.steps_per_checkpoint
-      loss += step_loss / FLAGS.steps_per_checkpoint
-      current_step += 1
+        if not exp_cost:
+          exp_cost = cost
+          exp_length = mean_length
+          exp_norm = grad_norm
+        else:
+          exp_cost = 0.99*exp_cost + 0.01*cost
+          exp_length = 0.99*exp_length + 0.01*mean_length
+          exp_norm = 0.99*exp_norm + 0.01*grad_norm
 
-      mean_length = np.mean(sequence_length)
-      std_length = np.std(sequence_length)
-      cost = step_loss / mean_length
-      if exp_cost == None:
-        exp_cost = step_loss
-        exp_length = mean_length
-      else:
-        exp_cost = 0.99*exp_cost + 0.01*step_loss
-        exp_length = 0.99*exp_length + 0.01*mean_length
-      if current_step % FLAGS.print_every == 0:
-        print('iter %d, cost %f, exp_cost %f, grad_norm %f, batch time %f, length mean/std %f/%f, bucket %d' %
-              (current_step, cost, exp_cost / exp_length, grad_norm, iter_time, mean_length, std_length, bucket_id))
-      # Once in a while, we save checkpoint, print statistics, and run evals.
-      if current_step % FLAGS.steps_per_checkpoint == 0:
-        # Print statistics for the previous epoch.
-        perplexity = math.exp(loss) if loss < 300 else float('inf')
-        print ("global step %d learning rate %.4f step-time %.2f perplexity "
-               "%.2f" % (model.global_step.eval(), model.learning_rate.eval(),
-                         step_time, perplexity))
-        # Decrease learning rate if no improvement was seen over last 3 times.
-        if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
-          sess.run(model.learning_rate_decay_op)
-        previous_losses.append(loss)
-        # Save checkpoint and zero timer and loss.
-        checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
-        model.saver.save(sess, checkpoint_path, global_step=model.global_step)
-        step_time, loss = 0.0, 0.0
-        # Run evals on development set and print their perplexity.
-        for bucket_id in xrange(len(_buckets)):
-          if len(dev_set[bucket_id]) == 0:
-            print("  eval: empty bucket %d" % (bucket_id))
-            continue
-          encoder_inputs, decoder_inputs, target_weights, sequence_length = model.get_batch(
-              dev_set, bucket_id)
-          eval_loss, _ = model.test(sess, encoder_inputs, decoder_inputs,
-                                    targets, target_weights)
-          eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
-          print("  eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
-        sys.stdout.flush()
+        cost = cost / mean_length
+
+        if current_step % FLAGS.print_every == 0:
+          print('epoch %d, iter %d, cost %f, exp_cost %f, grad_norm %f, batch time %f, length mean/std %f/%f' %
+                (epoch, current_step, cost, exp_cost / exp_length, grad_norm, iter_time, mean_length, std_length))
+
+      ## Checkpoint
+      checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
+      model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+
+      valid_costs, valid_lengths = [], []
+      for source_tokens, source_mask, target_tokens, target_mask in PairIter(x_dev, y_dev, FLAGS.batch_size, FLAGS.num_layers):
+        cost, _ = model.test(sess, source_tokens, source_mask, target_tokens, target_mask)
+        valid_costs.append(cost * target_mask.shape[1])
+        valid_lengths.append(np.sum(target_mask[1:, :]))
+      valid_cost = sum(valid_costs) / float(sum(valid_lengths))
+
+      print("Epoch %d Validation cost: %f" % (epoch, valid_cost))
+
+      previous_losses.append(valid_cost)
+      if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
+        sess.run(model.learning_rate_decay_op)
+      sys.stdout.flush()
 
 def main(_):
   train()

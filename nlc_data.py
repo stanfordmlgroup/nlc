@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Utilities for downloading data from WMT, tokenizing, vocabularies."""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -29,13 +28,13 @@ from tensorflow.python.platform import gfile
 
 # Special vocabulary symbols - we always put them at the start.
 _PAD = b"_PAD"
-_GO = b"_GO"
+_SOS = b"_SOS"
 _EOS = b"_EOS"
 _UNK = b"_UNK"
-_START_VOCAB = [_PAD, _GO, _EOS, _UNK]
+_START_VOCAB = [_PAD, _SOS, _EOS, _UNK]
 
 PAD_ID = 0
-GO_ID = 1
+SOS_ID = 1
 EOS_ID = 2
 UNK_ID = 3
 
@@ -43,7 +42,6 @@ UNK_ID = 3
 _WORD_SPLIT = re.compile(b"([.,!?\"':;)(])")
 _DIGIT_RE = re.compile(br"\d")
 
-# URLs for WMT data.
 _NLC_TRAIN_URL = "http://neuron.stanford.edu/nlc/nlc-train.tar"
 _NLC_DEV_URL = "http://neuron.stanford.edu/nlc/nlc-valid.tar"
 
@@ -114,22 +112,6 @@ def char_tokenizer(sentence):
 
 def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
                       tokenizer=None, normalize_digits=True):
-  """Create vocabulary file (if it does not exist yet) from data file.
-
-  Data file is assumed to contain one sentence per line. Each sentence is
-  tokenized and digits are normalized (if normalize_digits is set).
-  Vocabulary contains the most-frequent tokens up to max_vocabulary_size.
-  We write it to vocabulary_path in a one-token-per-line format, so that later
-  token in the first line gets id=0, second line gets id=1, and so on.
-
-  Args:
-    vocabulary_path: path where the vocabulary will be created.
-    data_path: data file that will be used to create vocabulary.
-    max_vocabulary_size: limit on the size of the created vocabulary.
-    tokenizer: a function to use to tokenize each data sentence;
-      if None, basic_tokenizer will be used.
-    normalize_digits: Boolean; if true, all digits are replaced by 0s.
-  """
   if not gfile.Exists(vocabulary_path):
     print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
     vocab = {}
@@ -156,24 +138,6 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
 
 
 def initialize_vocabulary(vocabulary_path):
-  """Initialize vocabulary from file.
-
-  We assume the vocabulary is stored one-item-per-line, so a file:
-    dog
-    cat
-  will result in a vocabulary {"dog": 0, "cat": 1}, and this function will
-  also return the reversed-vocabulary ["dog", "cat"].
-
-  Args:
-    vocabulary_path: path to the file containing the vocabulary.
-
-  Returns:
-    a pair: the vocabulary (a dictionary mapping string to integers), and
-    the reversed vocabulary (a list, which reverses the vocabulary mapping).
-
-  Raises:
-    ValueError: if the provided vocabulary_path does not exist.
-  """
   if gfile.Exists(vocabulary_path):
     rev_vocab = []
     with gfile.GFile(vocabulary_path, mode="rb") as f:
@@ -187,23 +151,6 @@ def initialize_vocabulary(vocabulary_path):
 
 def sentence_to_token_ids(sentence, vocabulary,
                           tokenizer=None, normalize_digits=True):
-  """Convert a string to list of integers representing token-ids.
-
-  For example, a sentence "I have a dog" may become tokenized into
-  ["I", "have", "a", "dog"] and with vocabulary {"I": 1, "have": 2,
-  "a": 4, "dog": 7"} this function will return [1, 2, 4, 7].
-
-  Args:
-    sentence: the sentence in bytes format to convert to token-ids.
-    vocabulary: a dictionary mapping tokens to integers.
-    tokenizer: a function to use to tokenize each sentence;
-      if None, basic_tokenizer will be used.
-    normalize_digits: Boolean; if true, all digits are replaced by 0s.
-
-  Returns:
-    a list of integers, the token-ids for the sentence.
-  """
-
   if tokenizer:
     words = tokenizer(sentence)
   else:
@@ -216,20 +163,6 @@ def sentence_to_token_ids(sentence, vocabulary,
 
 def data_to_token_ids(data_path, target_path, vocabulary_path,
                       tokenizer=None, normalize_digits=True):
-  """Tokenize data file and turn into token-ids using given vocabulary file.
-
-  This function loads data line-by-line from data_path, calls the above
-  sentence_to_token_ids, and saves the result to target_path. See comment
-  for sentence_to_token_ids on the details of token-ids format.
-
-  Args:
-    data_path: path to the data file in one-sentence-per-line format.
-    target_path: path where the file with token-ids will be created.
-    vocabulary_path: path to the vocabulary file.
-    tokenizer: a function to use to tokenize each sentence;
-      if None, basic_tokenizer will be used.
-    normalize_digits: Boolean; if true, all digits are replaced by 0s.
-  """
   if not gfile.Exists(target_path):
     print("Tokenizing data in %s" % data_path)
     vocab, _ = initialize_vocabulary(vocabulary_path)
@@ -246,24 +179,6 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
 
 
 def prepare_nlc_data(data_dir, x_vocabulary_size, y_vocabulary_size, tokenizer=char_tokenizer):
-  """Get NLC data into data_dir, create vocabularies and tokenize data.
-
-  Args:
-    data_dir: directory in which the data sets will be stored.
-    en_vocabulary_size: size of the English vocabulary to create and use.
-    fr_vocabulary_size: size of the French vocabulary to create and use.
-    tokenizer: a function to use to tokenize each data sentence;
-      if None, basic_tokenizer will be used.
-
-  Returns:
-    A tuple of 6 elements:
-      (1) path to the token-ids for English training data-set,
-      (2) path to the token-ids for French training data-set,
-      (3) path to the token-ids for English development data-set,
-      (4) path to the token-ids for French development data-set,
-      (5) path to the English vocabulary file,
-      (6) path to the French vocabulary file.
-  """
   # Get nlc data to the specified directory.
   train_path = get_nlc_train_set(data_dir)
   dev_path = get_nlc_dev_set(data_dir)

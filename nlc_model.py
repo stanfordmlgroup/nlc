@@ -82,11 +82,9 @@ class NLCModel(object):
     self.setup_decoder()
     self.setup_loss()
 
-    # Gradients and SGD update operation for training the model.
-    # TODO: adam optimizer
     params = tf.trainable_variables()
     if not forward_only:
-      opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+      opt = tf.train.AdamOptimizer(self.learning_rate)
 
       gradients = tf.gradients(self.losses, params)
       clipped_gradients, norm = tf.clip_by_global_norm(gradients, max_gradient_norm)
@@ -136,7 +134,7 @@ class NLCModel(object):
         self.decoder_output = out
 
   def setup_loss(self):
-    with vs.variable_scope("logistic"):
+    with vs.variable_scope("Logistic"):
       do2d = tf.reshape(self.decoder_output, [-1, self.size])
       logits2d = rnn_cell.linear(do2d, self.vocab_size, True, 1.0)
       outputs2d = tf.nn.softmax(logits2d)
@@ -181,11 +179,12 @@ class NLCModel(object):
     return (outputs, output_state)
 
   def train(self, session, source_tokens, target_tokens, source_mask, target_mask):
+    print(source_tokens.shape, target_tokens.shape, source_mask.shape, target_mask.shape)
     input_feed = {}
-    input_feed["source_tokens"] = source_tokens
-    input_feed["target_tokens"] = target_tokens
-    input_feed["source_mask"] = source_mask
-    input_feed["target_mask"] = target_mask
+    input_feed[self.source_tokens] = source_tokens
+    input_feed[self.target_tokens] = target_tokens
+    input_feed[self.source_mask] = source_mask
+    input_feed[self.target_mask] = target_mask
 
     output_feed = [self.updates, self.gradient_norms, self.losses]
 
@@ -193,12 +192,12 @@ class NLCModel(object):
 
     return outputs[1], outputs[2]
 
-  def test(self, session, encoder_inputs, decoder_inputs, targets, target_weights):
+  def test(self, session, source_tokens, target_tokens, source_mask, target_mask):
     input_feed = {}
-    input_feed["source_tokens"] = source_tokens
-    input_feed["target_tokens"] = target_tokens
-    input_feed["source_mask"] = source_mask
-    input_feed["target_mask"] = target_mask
+    input_feed[self.source_tokens] = source_tokens
+    input_feed[self.target_tokens] = target_tokens
+    input_feed[self.source_mask] = source_mask
+    input_feed[self.target_mask] = target_mask
 
     output_feed = [self.losses, self.outputs]
 
