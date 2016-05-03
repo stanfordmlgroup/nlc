@@ -39,7 +39,9 @@ class GRUCellAttn(rnn_cell.GRUCell):
     self.hs = encoder_output
     with vs.variable_scope(scope or type(self).__name__):
       with vs.variable_scope("Attn1"):
-        self.phi_hs = tanh(rnn_cell.linear(self.hs, num_units, True, 1.0))
+        hs2d = tf.reshape(self.hs, [-1, num_units])
+        phi_hs2d = tanh(rnn_cell.linear(hs2d, num_units, True, 1.0))
+        self.phi_hs = tf.reshape(phi_hs2d, tf.shape(self.hs))
     super(GRUCellAttn, self).__init__(num_units)
 
   def __call__(self, inputs, state, scope=None):
@@ -52,7 +54,7 @@ class GRUCellAttn(rnn_cell.GRUCell):
       weights = weights / (1e-6 + tf.reduce_sum(weights, reduction_indices=0, keep_dims=True))
       context = tf.reduce_sum(self.hs * weights, reduction_indices=0)
       with vs.variable_scope("AttnConcat"):
-        out = tf.relu(rnn_cell.linear([context, gru_out], self._num_units, True, 1.0))
+        out = tf.nn.relu(rnn_cell.linear([context, gru_out], self._num_units, True, 1.0))
       return (out, tf.slice(weights, [0, 0, 0], [-1, -1, 1]))
 
 class NLCModel(object):
@@ -102,7 +104,7 @@ class NLCModel(object):
     self.encoder_output, self.encoder_hidden = self.bidirectional_rnn(self.encoder_cell, self.encoder_inputs)
 
   def setup_decoder(self):
-    self.decoder_cell = GRUCellAttn(self.size, self.encoder_hidden, scope=None)
+    self.decoder_cell = GRUCellAttn(self.size, self.encoder_output, scope=None)
     self.decoder_output, self.decoder_hidden = rnn.dynamic_rnn(self.decoder_cell, self.decoder_inputs, time_major=True,
                                                                dtype=dtypes.float32, sequence_length=self.sequence_length,
                                                                scope=None)
