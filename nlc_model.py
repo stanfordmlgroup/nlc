@@ -104,15 +104,14 @@ class NLCModel(object):
       self.decoder_inputs = embedding_ops.embedding_lookup(self.L_dec, self.target_tokens)
 
   def setup_encoder(self):
-    # TODO: add pyramid
     self.encoder_cell = rnn_cell.GRUCell(self.size)
     with vs.variable_scope("PryamidEncoder"):
       inp = self.encoder_inputs
       out = None
       for i in xrange(self.num_layers):
         with vs.variable_scope("EncoderCell%d" % i) as scope:
-          out, _ = self.bidirectional_rnn(self.encoder_cell, self.dropout(inp), scope=scope)
-          inp = out
+          out, _ = self.bidirectional_rnn(self.encoder_cell, self.dropout(inp), self.source_length, scope=scope)
+          inp = self.downscale(out)
       self.encoder_output = out
 
   def setup_decoder(self):
@@ -155,17 +154,26 @@ class NLCModel(object):
   def dropout(self, inp):
     return tf.nn.dropout(inp, self.keep_prob)
 
-  def bidirectional_rnn(self, cell, inputs, scope=None):
+  def downscale(self, inp):
+    with vs.variable_scope("Downscale"):
+      inp2d = tf.reshape(tf.transpose(inp, perm=[1, 0, 2]), [-1, 2 * self.size])
+      out2d = rnn_cell.linear(inp2d, self.size, True, 1.0)
+      out3d = tf.reshape(out2d, [self.batch_size, -1, self.size])
+      out3d = tf.transpose(out3d, perm=[1, 0, 2])
+      out = tanh(out3d)
+    return out
+
+  def bidirectional_rnn(self, cell, inputs, lengths, scope=None):
     name = scope.name or "BiRNN"
     # Forward direction
     with vs.variable_scope(name + "_FW") as fw_scope:
       output_fw, output_state_fw = rnn.dynamic_rnn(cell, inputs, time_major=True, dtype=dtypes.float32,
-                                                   sequence_length=self.source_length, scope=fw_scope)
+                                                   sequence_length=lengths, scope=fw_scope)
     # Backward direction
     with vs.variable_scope(name + "_BW") as bw_scope:
       output_bw, output_state_bw = rnn.dynamic_rnn(cell, inputs, time_major=True, dtype=dtypes.float32,
-                                                   sequence_length=self.source_length, scope=bw_scope)
-    output_bw = tf.reverse_sequence(output_bw, tf.to_int64(self.source_length), seq_dim=0, batch_dim=1)
+                                                   sequence_length=lengths, scope=bw_scope)
+    output_bw = tf.reverse_sequence(output_bw, tf.to_int64(lengths), seq_dim=0, batch_dim=1)
 
     outputs = output_fw + output_bw
     output_state = output_state_fw + output_state_bw
