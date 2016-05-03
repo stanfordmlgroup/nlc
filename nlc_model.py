@@ -121,8 +121,9 @@ class NLCModel(object):
 
       targets_no_GO = tf.slice(self.target_tokens, [1, 0], [-1, -1])
       masks_no_GO = tf.slice(self.target_mask, [1, 0], [-1, -1])
-      labels1d = tf.reshape(targets_no_GO, [-1])
-      mask1d = tf.reshape(masks_no_GO, [-1])
+      # easier to pad target/mask than to split decoder input since tensorflow does not support negative indexing
+      labels1d = tf.reshape(tf.pad(targets_no_GO, [[0, 1], [0, 0]]), [-1])
+      mask1d = tf.reshape(tf.pad(masks_no_GO, [[0, 1], [0, 0]]), [-1])
       losses1d = tf.nn.sparse_softmax_cross_entropy_with_logits(logits2d, labels1d) * tf.to_float(mask1d)
       losses2d = tf.reshape(losses1d, [-1, self.batch_size])
       self.losses = tf.reduce_sum(losses2d) / self.batch_size
