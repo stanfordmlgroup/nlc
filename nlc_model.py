@@ -55,7 +55,8 @@ class GRUCellAttn(rnn_cell.GRUCell):
       context = tf.reduce_sum(self.hs * weights, reduction_indices=0)
       with vs.variable_scope("AttnConcat"):
         out = tf.nn.relu(rnn_cell.linear([context, gru_out], self._num_units, True, 1.0))
-      return (out, tf.slice(weights, [0, 0, 0], [-1, -1, 1]))
+      attn_map = tf.reduce_sum(tf.slice(weights, [0, 0, 0], [-1, -1, 1]), reduction_indices=2)
+      return (out, out) 
 
 class NLCModel(object):
   def __init__(self, vocab_size, size, num_layers, max_gradient_norm, batch_size, learning_rate,
@@ -72,7 +73,8 @@ class NLCModel(object):
     self.target_tokens = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="target_tokens")
     self.source_mask = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="source_mask")
     self.target_mask = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="target_mask")
-    self.sequence_length = None
+    self.source_length = tf.reduce_sum(self.source_mask, reduction_indices=0)
+    self.target_length = tf.reduce_sum(self.target_mask, reduction_indices=0)
 
     self.setup_embeddings()
     self.setup_encoder()
@@ -100,26 +102,40 @@ class NLCModel(object):
       self.decoder_inputs = embedding_ops.embedding_lookup(self.L_dec, self.target_tokens)
 
   def setup_encoder(self):
+    # TODO: make multi-layer
     self.encoder_cell = rnn_cell.GRUCell(self.size)
     self.encoder_output, self.encoder_hidden = self.bidirectional_rnn(self.encoder_cell, self.encoder_inputs)
 
   def setup_decoder(self):
+    # TODO: make multi-layer
     self.decoder_cell = GRUCellAttn(self.size, self.encoder_output, scope=None)
     self.decoder_output, self.decoder_hidden = rnn.dynamic_rnn(self.decoder_cell, self.decoder_inputs, time_major=True,
-                                                               dtype=dtypes.float32, sequence_length=self.sequence_length,
+                                                               dtype=dtypes.float32, sequence_length=self.target_length,
                                                                scope=None)
   def setup_loss(self):
-    pass
+    with vs.variable_scope("logistic"):
+      do2d = tf.reshape(self.decoder_output, [-1, self.size])
+      logits2d = rnn_cell.linear(do2d, self.vocab_size, True, 1.0)
+      outputs2d = tf.nn.softmax(logits2d)
+      self.outputs = tf.reshape(outputs2d, [-1, self.batch_size, self.vocab_size])
 
-  def bidirectional_rnn(self, cell, inputs, sequence_length=None):
+      targets_no_GO = tf.slice(self.target_tokens, [1, 0], [-1, -1])
+      masks_no_GO = tf.slice(self.target_mask, [1, 0], [-1, -1])
+      labels1d = tf.reshape(targets_no_GO, [-1])
+      mask1d = tf.reshape(masks_no_GO, [-1])
+      losses1d = tf.nn.sparse_softmax_cross_entropy_with_logits(logits2d, labels1d) * tf.to_float(mask1d)
+      losses2d = tf.reshape(losses1d, [-1, self.batch_size])
+      self.losses = tf.reduce_sum(losses2d) / self.batch_size
+
+  def bidirectional_rnn(self, cell, inputs):
     name = "BiRNN"
     # Forward direction
     with vs.variable_scope(name + "_FW") as fw_scope:
       output_fw, output_state_fw = rnn.dynamic_rnn(cell, inputs, time_major=True, dtype=dtypes.float32,
-                                                   sequence_length=sequence_length, scope=fw_scope)
+                                                   sequence_length=self.source_length, scope=fw_scope)
 
-    # Backward direction
     # TODO implement _reverse_seq on Tensor
+    # Backward direction
 #    with vs.variable_scope(name + "_BW") as bw_scope:
 #      tmp, output_state_bw = rnn.dynamic_rnn(cell, rnn._reverse_seq(inputs, sequence_length),
 #                                             time_major=True, dtype=dtypes.float32,
@@ -131,12 +147,12 @@ class NLCModel(object):
 
     return (outputs, output_state)
 
-  def train(self, session, encoder_inputs, decoder_inputs, targets, target_weights):
+  def train(self, session, source_tokens, target_tokens, source_mask, target_mask):
     input_feed = {}
-    input_feed["encoder"] = encoder_inputs
-    input_feed["decoder"] = decoder_inputs
-    input_feed["targets"] = targets
-    input_feed["weights"] = target_weights
+    input_feed["source_tokens"] = source_tokens
+    input_feed["target_tokens"] = target_tokens
+    input_feed["source_mask"] = source_mask
+    input_feed["target_mask"] = target_mask
 
     output_feed = [self.updates, self.gradient_norms, self.losses]
 
@@ -146,10 +162,10 @@ class NLCModel(object):
 
   def test(self, session, encoder_inputs, decoder_inputs, targets, target_weights):
     input_feed = {}
-    input_feed["encoder"] = encoder_inputs
-    input_feed["decoder"] = decoder_inputs
-    input_feed["targets"] = targets
-    input_feed["weights"] = target_weights
+    input_feed["source_tokens"] = source_tokens
+    input_feed["target_tokens"] = target_tokens
+    input_feed["source_mask"] = source_mask
+    input_feed["target_mask"] = target_mask
 
     output_feed = [self.losses, self.outputs]
 
