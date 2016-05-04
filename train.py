@@ -22,6 +22,7 @@ import os
 import random
 import sys
 import time
+import random
 
 import numpy as np
 from six.moves import xrange
@@ -68,13 +69,15 @@ class PairIter:
         break
       linex, liney = self.fdx.readline(), self.fdy.readline()
 
-    line_pairs.sort(lambda x, y: len(x))
+    line_pairs = sorted(line_pairs, key=lambda e: len(e[0].split()))
 
-    for batch_start in xrange(0, len(line_pairs), int(len(line_pairs)/self.batch_size)):
+    for batch_start in xrange(0, len(line_pairs), self.batch_size):
       x_batch, y_batch = zip(*line_pairs[batch_start:batch_start+self.batch_size])
       if len(x_batch) < self.batch_size:
         break
       self.batches.append((x_batch, y_batch))
+
+    random.shuffle(self.batches)
 
   def next(self):
     if len(self.batches) == 0:
