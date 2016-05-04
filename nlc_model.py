@@ -178,8 +178,7 @@ class NLCModel(object):
 
     return (outputs, output_state)
 
-  def train(self, session, source_tokens, target_tokens, source_mask, target_mask):
-    print(source_tokens.shape, target_tokens.shape, source_mask.shape, target_mask.shape)
+  def train(self, session, source_tokens, source_mask, target_tokens, target_mask):
     input_feed = {}
     input_feed[self.source_tokens] = source_tokens
     input_feed[self.target_tokens] = target_tokens
@@ -192,7 +191,7 @@ class NLCModel(object):
 
     return outputs[1], outputs[2]
 
-  def test(self, session, source_tokens, target_tokens, source_mask, target_mask):
+  def test(self, session, source_tokens, source_mask, target_tokens, target_mask):
     input_feed = {}
     input_feed[self.source_tokens] = source_tokens
     input_feed[self.target_tokens] = target_tokens

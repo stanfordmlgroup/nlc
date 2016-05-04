@@ -150,7 +150,7 @@ def train():
         # Get a batch and make a step.
         tic = time.time()
 
-        _, grad_norm, cost = model.train(sess, source_tokens, source_mask, target_tokens, target_mask)
+        grad_norm, cost = model.train(sess, source_tokens, source_mask, target_tokens, target_mask)
 
         toc = time.time()
         iter_time = toc - tic
