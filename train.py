@@ -38,7 +38,8 @@ tf.app.flags.DEFINE_integer("batch_size", 128, "Batch size to use during trainin
 tf.app.flags.DEFINE_integer("epochs", 0, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("size", 400, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 3, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("vocab_size", 400, "Vocabulary size for word model.")
+tf.app.flags.DEFINE_integer("max_vocab_size", 40000, "Vocabulary size limit.")
+tf.app.flags.DEFINE_integer("max_seq_len", 200, "Maximum sequence length.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
 tf.app.flags.DEFINE_string("tokenizer", "CHAR", "Set to WORD to train word level model.")
@@ -61,7 +62,8 @@ class PairIter:
     linex, liney = self.fdx.readline(), self.fdy.readline()
 
     while linex and liney:
-      line_pairs.append((linex, liney))
+      if len(linex.split()) < FLAGS.max_seq_len and len(liney.split()) < FLAGS.max_seq_len:
+        line_pairs.append((linex, liney))
       if len(line_pairs) == self.batch_size * 16:
         break
       linex, liney = self.fdx.readline(), self.fdy.readline()
@@ -104,9 +106,9 @@ class PairIter:
 
     return source_tokens, source_mask, target_tokens, target_mask
 
-def create_model(session, forward_only):
+def create_model(session, vocab_size, forward_only):
   model = nlc_model.NLCModel(
-      FLAGS.vocab_size, FLAGS.size, FLAGS.num_layers, FLAGS.max_gradient_norm, FLAGS.batch_size,
+      vocab_size, FLAGS.size, FLAGS.num_layers, FLAGS.max_gradient_norm, FLAGS.batch_size,
       FLAGS.learning_rate, FLAGS.learning_rate_decay_factor, FLAGS.dropout,
       forward_only=forward_only)
   ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
@@ -129,13 +131,16 @@ def train():
   # Prepare NLC data.
   print("Preparing NLC data in %s" % FLAGS.data_dir)
 
-  x_train, y_train, x_dev, y_dev, _, _ = nlc_data.prepare_nlc_data(
-    FLAGS.data_dir + '/' + FLAGS.tokenizer.lower(), FLAGS.vocab_size, FLAGS.vocab_size,
+  x_train, y_train, x_dev, y_dev, vocab_path = nlc_data.prepare_nlc_data(
+    FLAGS.data_dir + '/' + FLAGS.tokenizer.lower(), FLAGS.max_vocab_size,
     tokenizer=get_tokenizer(FLAGS))
+  vocab, _ = nlc_data.initialize_vocabulary(vocab_path)
+  vocab_size = len(vocab)
+  print("Vocabulary size: %d" % vocab_size)
 
   with tf.Session() as sess:
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
-    model = create_model(sess, False)
+    model = create_model(sess, vocab_size, False)
 
     epoch = 0
     while (FLAGS.epochs == 0 or epoch < FLAGS.epochs):
