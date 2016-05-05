@@ -34,7 +34,7 @@ import nlc_data
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
-tf.app.flags.DEFINE_float("dropout", 0.0, "Fraction of units randomly dropped on non-recurrent connections.")
+tf.app.flags.DEFINE_float("dropout", 0.1, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 128, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("epochs", 0, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("size", 400, "Size of each model layer.")
@@ -60,16 +60,22 @@ class PairIter:
 
   def refill(self):
     line_pairs = []
+
+    def tokenize(string):
+      return [int(s) for s in string.split()]
+
     linex, liney = self.fdx.readline(), self.fdy.readline()
 
     while linex and liney:
-      if len(linex.split()) < FLAGS.max_seq_len and len(liney.split()) < FLAGS.max_seq_len:
-        line_pairs.append((linex, liney))
+      x_tokens, y_tokens = tokenize(linex), tokenize(liney)
+
+      if len(x_tokens) < FLAGS.max_seq_len and len(y_tokens) < FLAGS.max_seq_len:
+        line_pairs.append((x_tokens, y_tokens))
       if len(line_pairs) == self.batch_size * 16:
         break
       linex, liney = self.fdx.readline(), self.fdy.readline()
 
-    line_pairs = sorted(line_pairs, key=lambda e: len(e[0].split()))
+    line_pairs = sorted(line_pairs, key=lambda e: len(e[0]))
 
     for batch_start in xrange(0, len(line_pairs), self.batch_size):
       x_batch, y_batch = zip(*line_pairs[batch_start:batch_start+self.batch_size])
@@ -85,9 +91,6 @@ class PairIter:
     if len(self.batches) == 0:
       raise StopIteration()
 
-    def tokenize(batch):
-      return map(lambda string: [int(s) for s in string.split()], batch)
-
     def add_sos_eos(tokens):
       return map(lambda token_list: [nlc_data.SOS_ID] + token_list + [nlc_data.EOS_ID], tokens)
 
@@ -97,8 +100,7 @@ class PairIter:
       padlen = maxlen + (align - maxlen) % align
       return map(lambda token_list: token_list + [nlc_data.PAD_ID] * (padlen - len(token_list)), tokens)
 
-    x_batch, y_batch = self.batches.pop(0)
-    x_tokens, y_tokens = tokenize(x_batch), tokenize(y_batch)
+    x_tokens, y_tokens = self.batches.pop(0)
     y_tokens = add_sos_eos(y_tokens)
     x_padded, y_padded = padded(x_tokens, self.num_layers), padded(y_tokens, 1)
 
@@ -146,6 +148,7 @@ def train():
     model = create_model(sess, vocab_size, False)
 
     epoch = 0
+    previous_losses = []
     while (FLAGS.epochs == 0 or epoch < FLAGS.epochs):
       epoch += 1
       current_step = 0
@@ -158,7 +161,7 @@ def train():
         # Get a batch and make a step.
         tic = time.time()
 
-        grad_norm, cost = model.train(sess, source_tokens, source_mask, target_tokens, target_mask)
+        grad_norm, cost, param_norm = model.train(sess, source_tokens, source_mask, target_tokens, target_mask)
 
         toc = time.time()
         iter_time = toc - tic
@@ -180,8 +183,8 @@ def train():
         cost = cost / mean_length
 
         if current_step % FLAGS.print_every == 0:
-          print('epoch %d, iter %d, cost %f, exp_cost %f, grad_norm %f, batch time %f, length mean/std %f/%f' %
-                (epoch, current_step, cost, exp_cost / exp_length, grad_norm, iter_time, mean_length, std_length))
+          print('epoch %d, iter %d, cost %f, exp_cost %f, grad norm %f, param norm %f, batch time %f, length mean/std %f/%f' %
+                (epoch, current_step, cost, exp_cost / exp_length, grad_norm, param_norm, iter_time, mean_length, std_length))
 
       ## Checkpoint
       checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")

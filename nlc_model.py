@@ -87,8 +87,9 @@ class NLCModel(object):
       opt = tf.train.AdamOptimizer(self.learning_rate)
 
       gradients = tf.gradients(self.losses, params)
-      clipped_gradients, norm = tf.clip_by_global_norm(gradients, max_gradient_norm)
-      self.gradient_norms = norm
+      clipped_gradients, _ = tf.clip_by_global_norm(gradients, max_gradient_norm)
+      self.gradient_norm = tf.global_norm(clipped_gradients)
+      self.param_norm = tf.global_norm(params)
       self.updates = opt.apply_gradients(
         zip(clipped_gradients, params), global_step=self.global_step)
 
@@ -105,11 +106,13 @@ class NLCModel(object):
     self.encoder_cell = rnn_cell.GRUCell(self.size)
     with vs.variable_scope("PryamidEncoder"):
       inp = self.encoder_inputs
+      mask = self.source_mask
       out = None
       for i in xrange(self.num_layers):
         with vs.variable_scope("EncoderCell%d" % i) as scope:
-          out, _ = self.bidirectional_rnn(self.encoder_cell, self.dropout(inp), self.source_length, scope=scope)
-          inp = self.downscale(out)
+          srclen = tf.reduce_sum(mask, reduction_indices=0)
+          out, _ = self.bidirectional_rnn(self.encoder_cell, self.dropout(inp), srclen, scope=scope)
+          inp, mask = self.downscale(out, mask)
       self.encoder_output = out
 
   def setup_decoder(self):
@@ -152,14 +155,22 @@ class NLCModel(object):
   def dropout(self, inp):
     return tf.nn.dropout(inp, self.keep_prob)
 
-  def downscale(self, inp):
+  def downscale(self, inp, mask):
     with vs.variable_scope("Downscale"):
       inp2d = tf.reshape(tf.transpose(inp, perm=[1, 0, 2]), [-1, 2 * self.size])
       out2d = rnn_cell.linear(inp2d, self.size, True, 1.0)
       out3d = tf.reshape(out2d, [self.batch_size, -1, self.size])
       out3d = tf.transpose(out3d, perm=[1, 0, 2])
       out = tanh(out3d)
-    return out
+
+      mask = tf.transpose(mask)
+      mask = tf.reshape(mask, [-1, 2])
+      mask = tf.cast(mask, tf.bool)
+      mask = tf.reduce_any(mask, reduction_indices=1)
+      mask = tf.to_int32(mask)
+      mask = tf.reshape(mask, [self.batch_size, -1])
+      mask = tf.transpose(mask)
+    return out, mask
 
   def bidirectional_rnn(self, cell, inputs, lengths, scope=None):
     name = scope.name or "BiRNN"
@@ -171,6 +182,7 @@ class NLCModel(object):
     with vs.variable_scope(name + "_BW") as bw_scope:
       output_bw, output_state_bw = rnn.dynamic_rnn(cell, inputs, time_major=True, dtype=dtypes.float32,
                                                    sequence_length=lengths, scope=bw_scope)
+
     output_bw = tf.reverse_sequence(output_bw, tf.to_int64(lengths), seq_dim=0, batch_dim=1)
 
     outputs = output_fw + output_bw
@@ -185,11 +197,11 @@ class NLCModel(object):
     input_feed[self.source_mask] = source_mask
     input_feed[self.target_mask] = target_mask
 
-    output_feed = [self.updates, self.gradient_norms, self.losses]
+    output_feed = [self.updates, self.gradient_norm, self.losses, self.param_norm]
 
     outputs = session.run(output_feed, input_feed)
 
-    return outputs[1], outputs[2]
+    return outputs[1], outputs[2], outputs[3]
 
   def test(self, session, source_tokens, source_mask, target_tokens, target_mask):
     input_feed = {}
