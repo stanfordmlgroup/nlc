@@ -32,7 +32,7 @@ import nlc_model
 import nlc_data
 
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
-tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99, "Learning rate decays by this much.")
+tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.1, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 128, "Batch size to use during training.")
@@ -147,6 +147,13 @@ def train():
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, vocab_size, False)
 
+    if False:
+      tic = time.time()
+      params = tf.trainable_variables()
+      num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
+      toc = time.time()
+      print ("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+
     epoch = 0
     previous_losses = []
     while (FLAGS.epochs == 0 or epoch < FLAGS.epochs):
@@ -200,7 +207,7 @@ def train():
       print("Epoch %d Validation cost: %f" % (epoch, valid_cost))
 
       previous_losses.append(valid_cost)
-      if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
+      if len(previous_losses) > 2 and valid_cost > max(previous_losses[-3:]):
         sess.run(model.learning_rate_decay_op)
       sys.stdout.flush()
 

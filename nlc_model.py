@@ -98,7 +98,7 @@ class NLCModel(object):
   def setup_embeddings(self):
     with vs.variable_scope("embeddings"):
       self.L_enc = tf.get_variable("L_enc", [self.vocab_size, self.size])
-      self.L_dec = self.L_enc #tf.get_variable("L_dec", [self.vocab_size, self.size])
+      self.L_dec = tf.get_variable("L_dec", [self.vocab_size, self.size])
       self.encoder_inputs = embedding_ops.embedding_lookup(self.L_enc, self.source_tokens)
       self.decoder_inputs = embedding_ops.embedding_lookup(self.L_dec, self.target_tokens)
 
