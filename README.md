@@ -20,9 +20,9 @@ TRAINING
 
 To train character level model (default):
 
-   $ python nlc.py
+   $ python train.py
 
 
 To train word level model:
 
-   $ python nlc.py --tokenizer WORD
+   $ python train.py --tokenizer WORD
