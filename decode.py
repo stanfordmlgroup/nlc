@@ -90,7 +90,7 @@ def decode():
     tokenizer=get_tokenizer(FLAGS))
   vocab, reverse_vocab = nlc_data.initialize_vocabulary(vocab_path)
   vocab_size = len(vocab)
-  print("Vocabulary size: %d, %d" % (len(vocab), len(reverse_vocab)))
+  print("Vocabulary size: %d" % len(vocab))
 
   with tf.Session() as sess:
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
