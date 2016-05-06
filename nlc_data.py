@@ -112,7 +112,7 @@ def char_tokenizer(sentence):
   return list(sentence.strip())
 
 def create_vocabulary(vocabulary_path, data_paths, max_vocabulary_size,
-                      tokenizer=None, normalize_digits=True):
+                      tokenizer=None, normalize_digits=False):
   if not gfile.Exists(vocabulary_path):
     print("Creating vocabulary %s from data %s" % (vocabulary_path, str(data_paths)))
     vocab = {}
@@ -152,7 +152,7 @@ def initialize_vocabulary(vocabulary_path):
 
 
 def sentence_to_token_ids(sentence, vocabulary,
-                          tokenizer=None, normalize_digits=True):
+                          tokenizer=None, normalize_digits=False):
   if tokenizer:
     words = tokenizer(sentence)
   else:
