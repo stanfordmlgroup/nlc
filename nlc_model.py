@@ -54,7 +54,7 @@ class GRUCellAttn(rnn_cell.GRUCell):
       context = tf.reduce_sum(self.hs * weights, reduction_indices=0)
       with vs.variable_scope("AttnConcat"):
         out = tf.nn.relu(rnn_cell.linear([context, gru_out], self._num_units, True, 1.0))
-      attn_map = tf.reduce_sum(tf.slice(weights, [0, 0, 0], [-1, -1, 1]), reduction_indices=2)
+      self.attn_map = tf.squeeze(tf.slice(weights, [0, 0, 0], [-1, -1, 1]))
       return (out, out) 
 
 class NLCModel(object):
@@ -70,12 +70,15 @@ class NLCModel(object):
     self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
     self.global_step = tf.Variable(0, trainable=False)
 
-    self.source_tokens = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="source_tokens")
-    self.target_tokens = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="target_tokens")
-    self.source_mask = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="source_mask")
-    self.target_mask = tf.placeholder(tf.int32, shape=[None, self.batch_size], name="target_mask")
-    self.source_length = tf.reduce_sum(self.source_mask, reduction_indices=0)
+    self.source_tokens = tf.placeholder(tf.int32, shape=[None, None])
+    self.target_tokens = tf.placeholder(tf.int32, shape=[None, None])
+    self.source_mask = tf.placeholder(tf.int32, shape=[None, None])
+    self.target_mask = tf.placeholder(tf.int32, shape=[None, None])
     self.target_length = tf.reduce_sum(self.target_mask, reduction_indices=0)
+
+    self.decoder_state_input, self.decoder_state_output = [], []
+    for i in xrange(num_layers):
+      self.decoder_state_input.append(tf.placeholder(tf.float32, shape=[None, size]))
 
     self.setup_embeddings()
     self.setup_encoder()
@@ -126,22 +129,27 @@ class NLCModel(object):
       inp = self.decoder_inputs
       for i in xrange(self.num_layers - 1):
         with vs.variable_scope("DecoderCell%d" % i) as scope:
-          out, _ = rnn.dynamic_rnn(self.decoder_cell, self.dropout(inp), time_major=True,
-                                   dtype=dtypes.float32, sequence_length=self.target_length,
-                                   scope=scope)
+          out, state_output = rnn.dynamic_rnn(self.decoder_cell, self.dropout(inp), time_major=True,
+                                              dtype=dtypes.float32, sequence_length=self.target_length,
+                                              scope=scope, initial_state=self.decoder_state_input[i])
           inp = out
+          self.decoder_state_output.append(state_output)
+
       with vs.variable_scope("DecoderAttnCell") as scope:
-        out, _ = rnn.dynamic_rnn(self.attn_cell, self.dropout(inp), time_major=True,
-                                 dtype=dtypes.float32, sequence_length=self.target_length,
-                                 scope=scope)
+        out, state_output = rnn.dynamic_rnn(self.attn_cell, self.dropout(inp), time_major=True,
+                                            dtype=dtypes.float32, sequence_length=self.target_length,
+                                            scope=scope, initial_state=self.decoder_state_input[i+1])
         self.decoder_output = out
+        self.decoder_state_output.append(state_output)
 
   def setup_loss(self):
     with vs.variable_scope("Logistic"):
+      doshape = tf.shape(self.decoder_output)
+      T, batch_size = doshape[0], doshape[1]
       do2d = tf.reshape(self.decoder_output, [-1, self.size])
       logits2d = rnn_cell.linear(do2d, self.vocab_size, True, 1.0)
       outputs2d = tf.nn.softmax(logits2d)
-      self.outputs = tf.reshape(outputs2d, [-1, self.batch_size, self.vocab_size])
+      self.outputs = tf.reshape(outputs2d, tf.pack([T, batch_size, self.vocab_size]))
 
       targets_no_GO = tf.slice(self.target_tokens, [1, 0], [-1, -1])
       masks_no_GO = tf.slice(self.target_mask, [1, 0], [-1, -1])
@@ -149,18 +157,21 @@ class NLCModel(object):
       labels1d = tf.reshape(tf.pad(targets_no_GO, [[0, 1], [0, 0]]), [-1])
       mask1d = tf.reshape(tf.pad(masks_no_GO, [[0, 1], [0, 0]]), [-1])
       losses1d = tf.nn.sparse_softmax_cross_entropy_with_logits(logits2d, labels1d) * tf.to_float(mask1d)
-      losses2d = tf.reshape(losses1d, [-1, self.batch_size])
-      self.losses = tf.reduce_sum(losses2d) / self.batch_size
+      losses2d = tf.reshape(losses1d, tf.pack([T, batch_size]))
+      self.losses = tf.reduce_sum(losses2d) / tf.to_float(batch_size)
 
   def dropout(self, inp):
     return tf.nn.dropout(inp, self.keep_prob)
 
   def downscale(self, inp, mask):
     with vs.variable_scope("Downscale"):
+      inshape = tf.shape(inp)
+      T, batch_size, dim = inshape[0], inshape[1], inshape[2]
       inp2d = tf.reshape(tf.transpose(inp, perm=[1, 0, 2]), [-1, 2 * self.size])
       out2d = rnn_cell.linear(inp2d, self.size, True, 1.0)
-      out3d = tf.reshape(out2d, [self.batch_size, -1, self.size])
+      out3d = tf.reshape(out2d, tf.pack((batch_size, tf.to_int32(T/2), dim)))
       out3d = tf.transpose(out3d, perm=[1, 0, 2])
+      out3d.set_shape([None, None, self.size])
       out = tanh(out3d)
 
       mask = tf.transpose(mask)
@@ -168,7 +179,7 @@ class NLCModel(object):
       mask = tf.cast(mask, tf.bool)
       mask = tf.reduce_any(mask, reduction_indices=1)
       mask = tf.to_int32(mask)
-      mask = tf.reshape(mask, [self.batch_size, -1])
+      mask = tf.reshape(mask, tf.pack([batch_size, -1]))
       mask = tf.transpose(mask)
     return out, mask
 
@@ -190,12 +201,18 @@ class NLCModel(object):
 
     return (outputs, output_state)
 
+  def set_default_decoder_state_input(self, input_feed, batch_size):
+    default_value = np.zeros([batch_size, self.size])
+    for i in xrange(self.num_layers):
+      input_feed[self.decoder_state_input[i]] = default_value
+
   def train(self, session, source_tokens, source_mask, target_tokens, target_mask):
     input_feed = {}
     input_feed[self.source_tokens] = source_tokens
     input_feed[self.target_tokens] = target_tokens
     input_feed[self.source_mask] = source_mask
     input_feed[self.target_mask] = target_mask
+    self.set_default_decoder_state_input(input_feed, target_tokens.shape[1])
 
     output_feed = [self.updates, self.gradient_norm, self.losses, self.param_norm]
 
@@ -209,9 +226,39 @@ class NLCModel(object):
     input_feed[self.target_tokens] = target_tokens
     input_feed[self.source_mask] = source_mask
     input_feed[self.target_mask] = target_mask
+    self.set_default_decoder_state_input(input_feed, target_tokens.shape[1])
 
     output_feed = [self.losses, self.outputs]
 
     outputs = session.run(output_feed, input_feed)
 
     return outputs[0], outputs[1]
+
+  def encode(self, session, source_tokens, source_mask):
+    input_feed = {}
+    input_feed[self.source_tokens] = source_tokens
+    input_feed[self.source_mask] = source_mask
+
+    output_feed = [self.encoder_output]
+
+    outputs = session.run(output_feed, input_feed)
+
+    return outputs[0]
+
+  def decode(self, session, encoder_output, target_tokens, target_mask=None, decoder_states=None):
+    input_feed = {}
+    input_feed[self.encoder_output] = encoder_output
+    input_feed[self.target_tokens] = target_tokens
+    input_feed[self.target_mask] = target_mask if target_mask else np.ones_like(target_tokens)
+
+    if not decoder_states:
+      self.set_default_decoder_state_input(input_feed, target_tokens.shape[1])
+    else:
+      for i in xrange(self.num_layers):
+        input_feed[self.decoder_state_input[i]] = decoder_states[i]
+
+    output_feed = [self.outputs] + self.decoder_state_output
+
+    outputs = session.run(output_feed, input_feed)
+
+    return outputs[0], None, outputs[1:]

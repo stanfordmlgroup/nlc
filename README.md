@@ -1,5 +1,5 @@
-!!WARNING!!
-===========
+Introduction
+============
 
 This porject is porting our original code in Theano to Tensorflow. Still in very early stage and under heavy development.
 
@@ -26,3 +26,9 @@ To train character level model (default):
 To train word level model:
 
    $ python train.py --tokenizer WORD
+
+
+INTERACTIVE DECODING
+====================
+
+   $ python decode.py
