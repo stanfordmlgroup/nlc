@@ -81,6 +81,28 @@ def tokenize(sent, vocab, depth):
 
   return source, mask
 
+def detokenize(sent, reverse_vocab):
+  outsent = ''
+  for t in sent:
+    outsent += reverse_vocab[t]
+  return outsent
+
+def decode_greedy(model, sess, encoder_output):
+  decoder_state = None
+  decoder_input = np.array([nlc_data.SOS_ID, ], dtype=np.int32).reshape([1, 1])
+  attention = []
+  output_sent = []
+  while True:
+    decoder_output, attn_map, decoder_state = model.decode(sess, encoder_output, decoder_input, decoder_states=decoder_state)
+    attention.append(attn_map)
+    token_highest_prob = np.argmax(decoder_output.flatten())
+    if token_highest_prob == nlc_data.EOS_ID or len(output_sent) > 200:
+      break
+    output_sent += [token_highest_prob]
+    decoder_input = np.array([token_highest_prob, ], dtype=np.int32).reshape([1, 1])
+
+  return output_sent
+
 def decode():
   # Prepare NLC data.
   print("Preparing NLC data in %s" % FLAGS.data_dir)
@@ -101,20 +123,11 @@ def decode():
       source, mask = tokenize(sent, vocab, FLAGS.num_layers)
 
       encoder_output = model.encode(sess, source, mask)
-      decoder_state = None
-      decoder_input = np.array([nlc_data.SOS_ID, ], dtype=np.int32).reshape([1, 1])
-      attention = []
-      output_sent = ''
-      while True:
-        decoder_output, attn_map, decoder_state = model.decode(sess, encoder_output, decoder_input, decoder_states=decoder_state)
-        attention.append(attn_map)
-        token_highest_prob = np.argmax(decoder_output.flatten())
-        if token_highest_prob == nlc_data.EOS_ID or len(output_sent) > 200:
-          break
-        output_sent += reverse_vocab[token_highest_prob]
-        decoder_input = np.array([token_highest_prob, ], dtype=np.int32).reshape([1, 1])
 
-      print("Candidate: ", ''.join(output_sent))
+      output_toks = decode_greedy(model, sess, encoder_output)
+      output_sent = detokenize(output_toks, reverse_vocab)
+
+      print("Candidate: ", output_sent)
 
 def main(_):
   decode()
