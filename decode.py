@@ -67,6 +67,7 @@ def get_tokenizer(FLAGS):
   tokenizer = nlc_data.char_tokenizer if FLAGS.tokenizer.lower() == 'char' else nlc_data.basic_tokenizer
   return tokenizer
 
+
 def tokenize(sent, vocab, depth):
   align = pow(2, depth - 1)
   token_ids = nlc_data.sentence_to_token_ids(sent, vocab, get_tokenizer(FLAGS))
@@ -81,15 +82,19 @@ def tokenize(sent, vocab, depth):
 
   return source, mask
 
+
 def detokenize(sent, reverse_vocab):
   outsent = ''
   for t in sent:
-    outsent += reverse_vocab[t]
+    if t >= len(nlc_data._START_VOCAB):
+      outsent += reverse_vocab[t]
   return outsent
+
 
 def decode_greedy(model, sess, encoder_output):
   decoder_state = None
   decoder_input = np.array([nlc_data.SOS_ID, ], dtype=np.int32).reshape([1, 1])
+
   attention = []
   output_sent = []
   while True:
@@ -103,8 +108,84 @@ def decode_greedy(model, sess, encoder_output):
 
   return output_sent
 
+
+def print_beam(beam, string='Beam'):
+  print(string, len(beam))
+  for (i, ray) in enumerate(beam):
+    print(i, ray[0], detokenize(ray[2], reverse_vocab))
+
+def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
+  logprobs = (decoder_output).squeeze(axis=0) # [batch_size x vocab_size]
+  newbeam = []
+
+  for (b, ray) in enumerate(beam):
+    prob, _, seq = ray
+    for v in reversed(list(np.argsort(logprobs[b, :]))): # Try to look at high probabilities in each ray first
+
+      newprob = prob + logprobs[b, v] # TODO: integrate language model
+
+      newray = (newprob, zipped_state[b], seq + [v])
+
+      if len(newbeam) > max_beam_size and newprob < newbeam[0][0]:
+        continue
+
+      if v == nlc_data.EOS_ID:
+        candidates += [newray]
+        candidates.sort(key=lambda r: r[0])
+        candidates = candidates[-max_beam_size:]
+      else:
+        newbeam += [newray]
+        newbeam.sort(key=lambda r: r[0])
+        newbeam = newbeam[-max_beam_size:]
+
+  print_beam(newbeam)
+
+  return newbeam, candidates
+
+
+def decoder_input(beam):
+  inp = np.array([ray[2][-1] for ray in beam], dtype=np.int32).reshape([1, -1])
+  return inp
+
+def decoder_state(beam):
+  if len(beam) == 1:
+    return None # Init state
+  return [np.array([(ray[1])[i, :] for ray in beam]) for i in xrange(FLAGS.num_layers)]
+
+
+def zip_state(state):
+  beam_size = state[0].shape[0]
+  return [np.array([s[i, :] for s in state]) for i in xrange(beam_size)]
+
+
+def decode_beam(model, sess, encoder_output, max_beam_size):
+  state, output = None, None
+  beam = [(0.0, None, [nlc_data.SOS_ID])] # (cumulative log prob, decoder state, [tokens seq])
+
+  candidates = []
+  for _ in xrange(200):
+    output, attn_map, state = model.decode(sess, encoder_output, decoder_input(beam), decoder_states=decoder_state(beam))
+    beam, candidates = beam_step(beam, candidates, output, zip_state(state), max_beam_size)
+
+  print_beam(candidates, 'Candidates')
+  finalray = candidates[-1]
+  return finalray[2]
+
+reverse_vocab, vocab = None, None
+
+def fix_sent(model, sess, sent):
+  source, mask = tokenize(sent, vocab, FLAGS.num_layers)
+
+  encoder_output = model.encode(sess, source, mask)
+
+  output_toks = decode_beam(model, sess, encoder_output, 8)
+  output_sent = detokenize(output_toks, reverse_vocab)
+
+  return output_sent
+
 def decode():
   # Prepare NLC data.
+  global reverse_vocab, vocab
   print("Preparing NLC data in %s" % FLAGS.data_dir)
 
   x_train, y_train, x_dev, y_dev, vocab_path = nlc_data.prepare_nlc_data(
@@ -112,7 +193,7 @@ def decode():
     tokenizer=get_tokenizer(FLAGS))
   vocab, reverse_vocab = nlc_data.initialize_vocabulary(vocab_path)
   vocab_size = len(vocab)
-  print("Vocabulary size: %d" % len(vocab))
+  print("Vocabulary size: %d" % vocab_size)
 
   with tf.Session() as sess:
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
@@ -120,12 +201,8 @@ def decode():
 
     while True:
       sent = raw_input("Enter a sentence: ")
-      source, mask = tokenize(sent, vocab, FLAGS.num_layers)
 
-      encoder_output = model.encode(sess, source, mask)
-
-      output_toks = decode_greedy(model, sess, encoder_output)
-      output_sent = detokenize(output_toks, reverse_vocab)
+      output_sent = fix_sent(model, sess, sent)
 
       print("Candidate: ", output_sent)
 

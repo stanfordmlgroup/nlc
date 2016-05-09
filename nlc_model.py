@@ -149,6 +149,7 @@ class NLCModel(object):
       do2d = tf.reshape(self.decoder_output, [-1, self.size])
       logits2d = rnn_cell.linear(do2d, self.vocab_size, True, 1.0)
       outputs2d = tf.nn.softmax(logits2d)
+      outputs2d = tf.Print(outputs2d, [tf.reduce_min(outputs2d)], message='Checking for negative')
       self.outputs = tf.reshape(outputs2d, tf.pack([T, batch_size, self.vocab_size]))
 
       targets_no_GO = tf.slice(self.target_tokens, [1, 0], [-1, -1])
