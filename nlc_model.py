@@ -148,7 +148,7 @@ class NLCModel(object):
       T, batch_size = doshape[0], doshape[1]
       do2d = tf.reshape(self.decoder_output, [-1, self.size])
       logits2d = rnn_cell.linear(do2d, self.vocab_size, True, 1.0)
-      outputs2d = tf.nn.softmax(logits2d)
+      outputs2d = tf.nn.log_softmax(logits2d)
       self.outputs = tf.reshape(outputs2d, tf.pack([T, batch_size, self.vocab_size]))
 
       targets_no_GO = tf.slice(self.target_tokens, [1, 0], [-1, -1])

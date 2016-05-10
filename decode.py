@@ -143,17 +143,17 @@ def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
   return newbeam, candidates
 
 
-def decoder_input(beam):
+def zip_input(beam):
   inp = np.array([ray[2][-1] for ray in beam], dtype=np.int32).reshape([1, -1])
   return inp
 
-def decoder_state(beam):
+def zip_state(beam):
   if len(beam) == 1:
     return None # Init state
   return [np.array([(ray[1])[i, :] for ray in beam]) for i in xrange(FLAGS.num_layers)]
 
 
-def zip_state(state):
+def unzip_state(state):b
   beam_size = state[0].shape[0]
   return [np.array([s[i, :] for s in state]) for i in xrange(beam_size)]
 
@@ -164,8 +164,8 @@ def decode_beam(model, sess, encoder_output, max_beam_size):
 
   candidates = []
   for _ in xrange(200):
-    output, attn_map, state = model.decode(sess, encoder_output, decoder_input(beam), decoder_states=decoder_state(beam))
-    beam, candidates = beam_step(beam, candidates, output, zip_state(state), max_beam_size)
+    output, attn_map, state = model.decode(sess, encoder_output, zip_input(beam), decoder_states=zip_state(beam))
+    beam, candidates = beam_step(beam, candidates, output, unzip_state(state), max_beam_size)
 
   print_beam(candidates, 'Candidates')
   finalray = candidates[-1]
