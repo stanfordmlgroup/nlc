@@ -44,9 +44,10 @@ tf.app.flags.DEFINE_integer("max_seq_len", 200, "Maximum sequence length.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
 tf.app.flags.DEFINE_string("tokenizer", "CHAR", "Set to WORD to train word level model.")
-tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
+tf.app.flags.DEFINE_integer("beam_size", 8, "Size of beam.")
 
 FLAGS = tf.app.flags.FLAGS
+reverse_vocab, vocab = None, None
 
 def create_model(session, vocab_size, forward_only):
   model = nlc_model.NLCModel(
@@ -68,7 +69,7 @@ def get_tokenizer(FLAGS):
   return tokenizer
 
 
-def tokenize(sent, vocab, depth):
+def tokenize(sent, vocab, depth=FLAGS.num_layers):
   align = pow(2, depth - 1)
   token_ids = nlc_data.sentence_to_token_ids(sent, vocab, get_tokenizer(FLAGS))
   ones = [1] * len(token_ids)
@@ -114,6 +115,23 @@ def print_beam(beam, string='Beam'):
   for (i, ray) in enumerate(beam):
     print(i, ray[0], detokenize(ray[2], reverse_vocab))
 
+
+def zip_input(beam):
+  inp = np.array([ray[2][-1] for ray in beam], dtype=np.int32).reshape([1, -1])
+  return inp
+
+
+def zip_state(beam):
+  if len(beam) == 1:
+    return None # Init state
+  return [np.array([(ray[1])[i, :] for ray in beam]) for i in xrange(FLAGS.num_layers)]
+
+
+def unzip_state(state):
+  beam_size = state[0].shape[0]
+  return [np.array([s[i, :] for s in state]) for i in xrange(beam_size)]
+
+
 def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
   logprobs = (decoder_output).squeeze(axis=0) # [batch_size x vocab_size]
   newbeam = []
@@ -125,7 +143,6 @@ def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
       newprob = prob + logprobs[b, v] # TODO: integrate language model
 
       newray = (newprob, zipped_state[b], seq + [v])
-
       if len(newbeam) > max_beam_size and newprob < newbeam[0][0]:
         continue
 
@@ -139,23 +156,7 @@ def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
         newbeam = newbeam[-max_beam_size:]
 
   print_beam(newbeam)
-
   return newbeam, candidates
-
-
-def zip_input(beam):
-  inp = np.array([ray[2][-1] for ray in beam], dtype=np.int32).reshape([1, -1])
-  return inp
-
-def zip_state(beam):
-  if len(beam) == 1:
-    return None # Init state
-  return [np.array([(ray[1])[i, :] for ray in beam]) for i in xrange(FLAGS.num_layers)]
-
-
-def unzip_state(state):b
-  beam_size = state[0].shape[0]
-  return [np.array([s[i, :] for s in state]) for i in xrange(beam_size)]
 
 
 def decode_beam(model, sess, encoder_output, max_beam_size):
@@ -171,16 +172,17 @@ def decode_beam(model, sess, encoder_output, max_beam_size):
   finalray = candidates[-1]
   return finalray[2]
 
-reverse_vocab, vocab = None, None
 
 def fix_sent(model, sess, sent):
-  source, mask = tokenize(sent, vocab, FLAGS.num_layers)
-
-  encoder_output = model.encode(sess, source, mask)
-
-  output_toks = decode_beam(model, sess, encoder_output, 8)
+  # Tokenize
+  input_toks, mask = tokenize(sent, vocab)
+  # Encode
+  encoder_output = model.encode(sess, input_toks, mask)
+  # Decode
+  output_toks = decode_beam(model, sess, encoder_output, FLAGS.beam_size)
+  # De-tokenize
   output_sent = detokenize(output_toks, reverse_vocab)
-
+  # Return
   return output_sent
 
 def decode():
