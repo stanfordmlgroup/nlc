@@ -23,10 +23,13 @@ import random
 import sys
 import time
 import random
+import string
 
 import numpy as np
 from six.moves import xrange
 import tensorflow as tf
+
+import kenlm
 
 import nlc_model
 import nlc_data
@@ -102,7 +105,7 @@ def decode_greedy(model, sess, encoder_output):
     decoder_output, attn_map, decoder_state = model.decode(sess, encoder_output, decoder_input, decoder_states=decoder_state)
     attention.append(attn_map)
     token_highest_prob = np.argmax(decoder_output.flatten())
-    if token_highest_prob == nlc_data.EOS_ID or len(output_sent) > 200:
+    if token_highest_prob == nlc_data.EOS_ID or len(output_sent) > FLAGS.max_seq_len:
       break
     output_sent += [token_highest_prob]
     decoder_input = np.array([token_highest_prob, ], dtype=np.int32).reshape([1, 1])
@@ -113,7 +116,8 @@ def decode_greedy(model, sess, encoder_output):
 def print_beam(beam, string='Beam'):
   print(string, len(beam))
   for (i, ray) in enumerate(beam):
-    print(i, ray[0], detokenize(ray[2], reverse_vocab))
+#    print(i, ray[0], detokenize(ray[2], reverse_vocab))
+    print(i, ray[0], ray[3])
 
 
 def zip_input(beam):
@@ -137,12 +141,18 @@ def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
   newbeam = []
 
   for (b, ray) in enumerate(beam):
-    prob, _, seq = ray
+    prob, _, seq, low = ray
     for v in reversed(list(np.argsort(logprobs[b, :]))): # Try to look at high probabilities in each ray first
 
       newprob = prob + logprobs[b, v] # TODO: integrate language model
 
-      newray = (newprob, zipped_state[b], seq + [v])
+      if reverse_vocab[v] in string.whitespace:
+        newray = (newprob, zipped_state[b], seq + [v], low + [''])
+      elif v >= len(nlc_data._START_VOCAB):
+        newray = (newprob, zipped_state[b], seq + [v], low[:-1] + [low[-1] + reverse_vocab[v]])
+      else:
+        newray = (newprob, zipped_state[b], seq + [v], low)
+
       if len(newbeam) > max_beam_size and newprob < newbeam[0][0]:
         continue
 
@@ -161,10 +171,10 @@ def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
 
 def decode_beam(model, sess, encoder_output, max_beam_size):
   state, output = None, None
-  beam = [(0.0, None, [nlc_data.SOS_ID])] # (cumulative log prob, decoder state, [tokens seq])
+  beam = [(0.0, None, [nlc_data.SOS_ID], [''])] # (cumulative log prob, decoder state, [tokens seq], ['list', 'of', 'words'])
 
   candidates = []
-  for _ in xrange(200):
+  for _ in xrange(FLAGS.max_seq_len):
     output, attn_map, state = model.decode(sess, encoder_output, zip_input(beam), decoder_states=zip_state(beam))
     beam, candidates = beam_step(beam, candidates, output, unzip_state(state), max_beam_size)
 
