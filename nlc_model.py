@@ -91,7 +91,8 @@ class NLCModel(object):
 
       gradients = tf.gradients(self.losses, params)
       clipped_gradients, _ = tf.clip_by_global_norm(gradients, max_gradient_norm)
-      self.gradient_norm = tf.global_norm(clipped_gradients)
+#      self.gradient_norm = tf.global_norm(clipped_gradients)
+      self.gradient_norm = tf.global_norm(gradients)
       self.param_norm = tf.global_norm(params)
       self.updates = opt.apply_gradients(
         zip(clipped_gradients, params), global_step=self.global_step)
