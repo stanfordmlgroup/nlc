@@ -48,9 +48,12 @@ tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
 tf.app.flags.DEFINE_string("tokenizer", "CHAR", "Set to WORD to train word level model.")
 tf.app.flags.DEFINE_integer("beam_size", 8, "Size of beam.")
+tf.app.flags.DEFINE_string("lmfile", None, "arpa file of the language model.")
+tf.app.flags.DEFINE_float("alpha", 0.4, "Language model weight.")
 
 FLAGS = tf.app.flags.FLAGS
 reverse_vocab, vocab = None, None
+lm = None
 
 def create_model(session, vocab_size, forward_only):
   model = nlc_model.NLCModel(
@@ -116,8 +119,8 @@ def decode_greedy(model, sess, encoder_output):
 def print_beam(beam, string='Beam'):
   print(string, len(beam))
   for (i, ray) in enumerate(beam):
-#    print(i, ray[0], detokenize(ray[2], reverse_vocab))
-    print(i, ray[0], ray[3])
+    print(i, ray[0], detokenize(ray[2], reverse_vocab))
+#    print(i, ray[0], ray[2])
 
 
 def zip_input(beam):
@@ -136,6 +139,26 @@ def unzip_state(state):
   return [np.array([s[i, :] for s in state]) for i in xrange(beam_size)]
 
 
+def log_rebase(val):
+  return np.log(10.0) * val
+
+
+def lmscore(ray, v):
+  if lm is None:
+    return 0.0
+
+  sent = ' '.join(ray[3])
+  if len(sent) == 0:
+    return 0.0
+
+  if v == nlc_data.EOS_ID:
+    return sum(w[0] for w in list(lm.full_scores(sent, eos=True))[-2:])
+  elif reverse_vocab[v] in string.whitespace:
+    return list(lm.full_scores(sent, eos=False))[-1][0]
+  else:
+    return 0.0
+
+
 def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
   logprobs = (decoder_output).squeeze(axis=0) # [batch_size x vocab_size]
   newbeam = []
@@ -144,7 +167,7 @@ def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
     prob, _, seq, low = ray
     for v in reversed(list(np.argsort(logprobs[b, :]))): # Try to look at high probabilities in each ray first
 
-      newprob = prob + logprobs[b, v] # TODO: integrate language model
+      newprob = prob + logprobs[b, v] + FLAGS.alpha * lmscore(ray, v)
 
       if reverse_vocab[v] in string.whitespace:
         newray = (newprob, zipped_state[b], seq + [v], low + [''])
@@ -165,6 +188,7 @@ def beam_step(beam, candidates, decoder_output, zipped_state, max_beam_size):
         newbeam.sort(key=lambda r: r[0])
         newbeam = newbeam[-max_beam_size:]
 
+  print('Candidates: %f - %f' % (candidates[0][0], candidates[-1][0]))
   print_beam(newbeam)
   return newbeam, candidates
 
@@ -174,9 +198,12 @@ def decode_beam(model, sess, encoder_output, max_beam_size):
   beam = [(0.0, None, [nlc_data.SOS_ID], [''])] # (cumulative log prob, decoder state, [tokens seq], ['list', 'of', 'words'])
 
   candidates = []
-  for _ in xrange(FLAGS.max_seq_len):
+  while True:
     output, attn_map, state = model.decode(sess, encoder_output, zip_input(beam), decoder_states=zip_state(beam))
     beam, candidates = beam_step(beam, candidates, output, unzip_state(state), max_beam_size)
+    if beam[-1][0] < 1.5 * candidates[0][0]:
+      # Best ray is worse than worst completed candidate. candidates[] cannot change after this.
+      break
 
   print_beam(candidates, 'Candidates')
   finalray = candidates[-1]
@@ -197,7 +224,12 @@ def fix_sent(model, sess, sent):
 
 def decode():
   # Prepare NLC data.
-  global reverse_vocab, vocab
+  global reverse_vocab, vocab, lm
+
+  if FLAGS.lmfile is not None:
+    print("Loading Language model from %s" % FLAGS.lmfile)
+    lm = kenlm.LanguageModel(FLAGS.lmfile)
+
   print("Preparing NLC data in %s" % FLAGS.data_dir)
 
   x_train, y_train, x_dev, y_dev, vocab_path = nlc_data.prepare_nlc_data(
