@@ -65,11 +65,12 @@ class NLCModel(object):
     self.vocab_size = vocab_size
     self.batch_size = batch_size
     self.num_layers = num_layers
-    self.keep_prob = 1.0 - dropout
+    self.keep_prob_config = 1.0 - dropout
     self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
     self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
     self.global_step = tf.Variable(0, trainable=False)
 
+    self.keep_prob = tf.placeholder(tf.float32)
     self.source_tokens = tf.placeholder(tf.int32, shape=[None, None])
     self.target_tokens = tf.placeholder(tf.int32, shape=[None, None])
     self.source_mask = tf.placeholder(tf.int32, shape=[None, None])
@@ -97,7 +98,7 @@ class NLCModel(object):
       self.updates = opt.apply_gradients(
         zip(clipped_gradients, params), global_step=self.global_step)
 
-    self.saver = tf.train.Saver(tf.all_variables())
+    self.saver = tf.train.Saver(tf.all_variables(), max_to_keep=0)
 
   def setup_embeddings(self):
     with vs.variable_scope("embeddings"):
@@ -213,6 +214,7 @@ class NLCModel(object):
     input_feed[self.target_tokens] = target_tokens
     input_feed[self.source_mask] = source_mask
     input_feed[self.target_mask] = target_mask
+    input_feed[self.keep_prob] = self.keep_prob_config
     self.set_default_decoder_state_input(input_feed, target_tokens.shape[1])
 
     output_feed = [self.updates, self.gradient_norm, self.losses, self.param_norm]
@@ -227,6 +229,7 @@ class NLCModel(object):
     input_feed[self.target_tokens] = target_tokens
     input_feed[self.source_mask] = source_mask
     input_feed[self.target_mask] = target_mask
+    input_feed[self.keep_prob] = 0.
     self.set_default_decoder_state_input(input_feed, target_tokens.shape[1])
 
     output_feed = [self.losses, self.outputs]
@@ -239,6 +242,7 @@ class NLCModel(object):
     input_feed = {}
     input_feed[self.source_tokens] = source_tokens
     input_feed[self.source_mask] = source_mask
+    input_feed[self.keep_prob] = 0.
 
     output_feed = [self.encoder_output]
 
@@ -251,6 +255,7 @@ class NLCModel(object):
     input_feed[self.encoder_output] = encoder_output
     input_feed[self.target_tokens] = target_tokens
     input_feed[self.target_mask] = target_mask if target_mask else np.ones_like(target_tokens)
+    input_feed[self.keep_prob] = 0.
 
     if not decoder_states:
       self.set_default_decoder_state_input(input_feed, target_tokens.shape[1])
