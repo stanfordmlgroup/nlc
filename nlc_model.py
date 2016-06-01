@@ -116,8 +116,9 @@ class NLCModel(object):
       for i in xrange(self.num_layers):
         with vs.variable_scope("EncoderCell%d" % i) as scope:
           srclen = tf.reduce_sum(mask, reduction_indices=0)
-          out, _ = self.bidirectional_rnn(self.encoder_cell, self.dropout(inp), srclen, scope=scope)
-          inp, mask = self.downscale(out, mask)
+          out, _ = self.bidirectional_rnn(self.encoder_cell, inp, srclen, scope=scope)
+          dropin, mask = self.downscale(out, mask)
+          inp = self.dropout(dropin)
       self.encoder_output = out
 
   def setup_decoder(self):
@@ -131,17 +132,17 @@ class NLCModel(object):
       inp = self.decoder_inputs
       for i in xrange(self.num_layers - 1):
         with vs.variable_scope("DecoderCell%d" % i) as scope:
-          out, state_output = rnn.dynamic_rnn(self.decoder_cell, self.dropout(inp), time_major=True,
+          out, state_output = rnn.dynamic_rnn(self.decoder_cell, inp, time_major=True,
                                               dtype=dtypes.float32, sequence_length=self.target_length,
                                               scope=scope, initial_state=self.decoder_state_input[i])
-          inp = out
+          inp = self.dropout(out)
           self.decoder_state_output.append(state_output)
 
       with vs.variable_scope("DecoderAttnCell") as scope:
-        out, state_output = rnn.dynamic_rnn(self.attn_cell, self.dropout(inp), time_major=True,
+        out, state_output = rnn.dynamic_rnn(self.attn_cell, inp, time_major=True,
                                             dtype=dtypes.float32, sequence_length=self.target_length,
                                             scope=scope, initial_state=self.decoder_state_input[i+1])
-        self.decoder_output = out
+        self.decoder_output = self.dropout(out)
         self.decoder_state_output.append(state_output)
 
   def setup_loss(self):
