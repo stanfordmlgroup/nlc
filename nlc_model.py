@@ -81,10 +81,11 @@ class NLCModel(object):
     for i in xrange(num_layers):
       self.decoder_state_input.append(tf.placeholder(tf.float32, shape=[None, size]))
 
-    self.setup_embeddings()
-    self.setup_encoder()
-    self.setup_decoder()
-    self.setup_loss()
+    with tf.variable_scope("NLC", initializer=tf.uniform_unit_scaling_initializer(0.1)):
+      self.setup_embeddings()
+      self.setup_encoder()
+      self.setup_decoder()
+      self.setup_loss()
 
     params = tf.trainable_variables()
     if not forward_only:
@@ -125,8 +126,6 @@ class NLCModel(object):
     if self.num_layers > 1:
       self.decoder_cell = rnn_cell.GRUCell(self.size)
     self.attn_cell = GRUCellAttn(self.size, self.encoder_output, scope="DecoderAttnCell")
-
-    out = self.decoder_inputs
 
     with vs.variable_scope("Decoder"):
       inp = self.decoder_inputs
@@ -230,20 +229,20 @@ class NLCModel(object):
     input_feed[self.target_tokens] = target_tokens
     input_feed[self.source_mask] = source_mask
     input_feed[self.target_mask] = target_mask
-    input_feed[self.keep_prob] = 0.
+    input_feed[self.keep_prob] = 1.
     self.set_default_decoder_state_input(input_feed, target_tokens.shape[1])
 
-    output_feed = [self.losses, self.outputs]
+    output_feed = [self.losses]
 
     outputs = session.run(output_feed, input_feed)
 
-    return outputs[0], outputs[1]
+    return outputs[0]
 
   def encode(self, session, source_tokens, source_mask):
     input_feed = {}
     input_feed[self.source_tokens] = source_tokens
     input_feed[self.source_mask] = source_mask
-    input_feed[self.keep_prob] = 0.
+    input_feed[self.keep_prob] = 1.
 
     output_feed = [self.encoder_output]
 
@@ -256,7 +255,7 @@ class NLCModel(object):
     input_feed[self.encoder_output] = encoder_output
     input_feed[self.target_tokens] = target_tokens
     input_feed[self.target_mask] = target_mask if target_mask else np.ones_like(target_tokens)
-    input_feed[self.keep_prob] = 0.
+    input_feed[self.keep_prob] = 1.
 
     if not decoder_states:
       self.set_default_decoder_state_input(input_feed, target_tokens.shape[1])

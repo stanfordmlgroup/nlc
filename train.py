@@ -36,7 +36,7 @@ tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate dec
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.0, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 128, "Batch size to use during training.")
-tf.app.flags.DEFINE_integer("epochs", 0, "Number of epochs to train.")
+tf.app.flags.DEFINE_integer("epochs", 40, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("size", 400, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 3, "Number of layers in the model.")
 tf.app.flags.DEFINE_integer("max_vocab_size", 40000, "Vocabulary size limit.")
@@ -123,12 +123,23 @@ def create_model(session, vocab_size, forward_only):
   else:
     print("Created model with fresh parameters.")
     session.run(tf.initialize_all_variables())
+    print('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
   return model
 
 
 def get_tokenizer(FLAGS):
   tokenizer = nlc_data.char_tokenizer if FLAGS.tokenizer.lower() == 'char' else nlc_data.basic_tokenizer
   return tokenizer
+
+
+def validate(model, sess, x_dev, y_dev):
+  valid_costs, valid_lengths = [], []
+  for source_tokens, source_mask, target_tokens, target_mask in PairIter(x_dev, y_dev, FLAGS.batch_size, FLAGS.num_layers):
+    cost = model.test(sess, source_tokens, source_mask, target_tokens, target_mask)
+    valid_costs.append(cost * target_mask.shape[1])
+    valid_lengths.append(np.sum(target_mask[1:, :]))
+  valid_cost = sum(valid_costs) / float(sum(valid_lengths))
+  return valid_cost
 
 
 def train():
@@ -146,6 +157,8 @@ def train():
   with tf.Session() as sess:
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, vocab_size, False)
+
+    print('Initial validation cost: %f' % validate(model, sess, x_dev, y_dev))
 
     if False:
       tic = time.time()
@@ -197,12 +210,8 @@ def train():
       checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
       model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
-      valid_costs, valid_lengths = [], []
-      for source_tokens, source_mask, target_tokens, target_mask in PairIter(x_dev, y_dev, FLAGS.batch_size, FLAGS.num_layers):
-        cost, _ = model.test(sess, source_tokens, source_mask, target_tokens, target_mask)
-        valid_costs.append(cost * target_mask.shape[1])
-        valid_lengths.append(np.sum(target_mask[1:, :]))
-      valid_cost = sum(valid_costs) / float(sum(valid_lengths))
+      ## Validate
+      valid_cost = validate(model, sess, x_dev, y_dev)
 
       print("Epoch %d Validation cost: %f" % (epoch, valid_cost))
 
