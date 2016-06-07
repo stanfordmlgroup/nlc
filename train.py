@@ -31,7 +31,7 @@ import tensorflow as tf
 import nlc_model
 import nlc_data
 
-tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.0003, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.0, "Fraction of units randomly dropped on non-recurrent connections.")

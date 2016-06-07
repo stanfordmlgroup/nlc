@@ -39,7 +39,7 @@ class GRUCellAttn(rnn_cell.GRUCell):
     with vs.variable_scope(scope or type(self).__name__):
       with vs.variable_scope("Attn1"):
         hs2d = tf.reshape(self.hs, [-1, num_units])
-        phi_hs2d = tanh(rnn_cell.linear(hs2d, num_units, True, 1.0))
+        phi_hs2d = tanh(rnn_cell._linear(hs2d, num_units, True, 1.0))
         self.phi_hs = tf.reshape(phi_hs2d, tf.shape(self.hs))
     super(GRUCellAttn, self).__init__(num_units)
 
@@ -47,13 +47,13 @@ class GRUCellAttn(rnn_cell.GRUCell):
     gru_out, gru_state = super(GRUCellAttn, self).__call__(inputs, state, scope)
     with vs.variable_scope(scope or type(self).__name__):
       with vs.variable_scope("Attn2"):
-        gamma_h = tanh(rnn_cell.linear(gru_out, self._num_units, True, 1.0))
+        gamma_h = tanh(rnn_cell._linear(gru_out, self._num_units, True, 1.0))
       weights = tf.reduce_sum(self.phi_hs * gamma_h, reduction_indices=2, keep_dims=True)
       weights = tf.exp(weights - tf.reduce_max(weights, reduction_indices=0, keep_dims=True))
       weights = weights / (1e-6 + tf.reduce_sum(weights, reduction_indices=0, keep_dims=True))
       context = tf.reduce_sum(self.hs * weights, reduction_indices=0)
       with vs.variable_scope("AttnConcat"):
-        out = tf.nn.relu(rnn_cell.linear([context, gru_out], self._num_units, True, 1.0))
+        out = tf.nn.relu(rnn_cell._linear([context, gru_out], self._num_units, True, 1.0))
       self.attn_map = tf.squeeze(tf.slice(weights, [0, 0, 0], [-1, -1, 1]))
       return (out, out) 
 
@@ -81,7 +81,7 @@ class NLCModel(object):
     for i in xrange(num_layers):
       self.decoder_state_input.append(tf.placeholder(tf.float32, shape=[None, size]))
 
-    with tf.variable_scope("NLC", initializer=tf.uniform_unit_scaling_initializer(0.1)):
+    with tf.variable_scope("NLC", initializer=tf.uniform_unit_scaling_initializer(1.0)):
       self.setup_embeddings()
       self.setup_encoder()
       self.setup_decoder()
@@ -149,7 +149,7 @@ class NLCModel(object):
       doshape = tf.shape(self.decoder_output)
       T, batch_size = doshape[0], doshape[1]
       do2d = tf.reshape(self.decoder_output, [-1, self.size])
-      logits2d = rnn_cell.linear(do2d, self.vocab_size, True, 1.0)
+      logits2d = rnn_cell._linear(do2d, self.vocab_size, True, 1.0)
       outputs2d = tf.nn.log_softmax(logits2d)
       self.outputs = tf.reshape(outputs2d, tf.pack([T, batch_size, self.vocab_size]))
 
@@ -170,7 +170,7 @@ class NLCModel(object):
       inshape = tf.shape(inp)
       T, batch_size, dim = inshape[0], inshape[1], inshape[2]
       inp2d = tf.reshape(tf.transpose(inp, perm=[1, 0, 2]), [-1, 2 * self.size])
-      out2d = rnn_cell.linear(inp2d, self.size, True, 1.0)
+      out2d = rnn_cell._linear(inp2d, self.size, True, 1.0)
       out3d = tf.reshape(out2d, tf.pack((batch_size, tf.to_int32(T/2), dim)))
       out3d = tf.transpose(out3d, perm=[1, 0, 2])
       out3d.set_shape([None, None, self.size])

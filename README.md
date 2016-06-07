@@ -12,7 +12,7 @@ Implementation of Neural Language Correction (http://arxiv.org/abs/1603.09727) o
 DEPENDENCIES
 ============
 
-Tensorflow 0.7 or 0.8
+Tensorflow 0.9
 
 
 TRAINING
