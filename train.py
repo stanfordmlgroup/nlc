@@ -169,10 +169,10 @@ def train():
 
     epoch = 0
     previous_losses = []
+    exp_cost = None
     while (FLAGS.epochs == 0 or epoch < FLAGS.epochs):
       epoch += 1
       current_step = 0
-      exp_cost = None
       exp_length = None
       exp_norm = None
 
