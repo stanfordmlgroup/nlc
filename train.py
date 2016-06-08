@@ -48,68 +48,65 @@ tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per pri
 
 FLAGS = tf.app.flags.FLAGS
 
-class PairIter:
-  def __init__(self, fnamex, fnamey, batch_size, num_layers):
-    self.fdx, self.fdy = open(fnamex), open(fnamey)
-    self.batch_size = batch_size
-    self.num_layers = num_layers
-    self.batches = []
 
-  def __iter__(self):
-    return self
+def tokenize(string):
+  return [int(s) for s in string.split()]
 
-  def refill(self):
-    line_pairs = []
+def refill(batches, fdx, fdy, batch_size):
+  line_pairs = []
+  linex, liney = fdx.readline(), fdy.readline()
 
-    def tokenize(string):
-      return [int(s) for s in string.split()]
+  while linex and liney:
+    x_tokens, y_tokens = tokenize(linex), tokenize(liney)
 
-    linex, liney = self.fdx.readline(), self.fdy.readline()
+    if len(x_tokens) < FLAGS.max_seq_len and len(y_tokens) < FLAGS.max_seq_len:
+      line_pairs.append((x_tokens, y_tokens))
+    if len(line_pairs) == batch_size * 16:
+      break
+    linex, liney = fdx.readline(), fdy.readline()
 
-    while linex and liney:
-      x_tokens, y_tokens = tokenize(linex), tokenize(liney)
+  line_pairs = sorted(line_pairs, key=lambda e: len(e[0]))
 
-      if len(x_tokens) < FLAGS.max_seq_len and len(y_tokens) < FLAGS.max_seq_len:
-        line_pairs.append((x_tokens, y_tokens))
-      if len(line_pairs) == self.batch_size * 16:
-        break
-      linex, liney = self.fdx.readline(), self.fdy.readline()
+  for batch_start in xrange(0, len(line_pairs), batch_size):
+    x_batch, y_batch = zip(*line_pairs[batch_start:batch_start+batch_size])
+    if len(x_batch) < batch_size:
+      break
+    batches.append((x_batch, y_batch))
 
-    line_pairs = sorted(line_pairs, key=lambda e: len(e[0]))
+  random.shuffle(batches)
+  return
 
-    for batch_start in xrange(0, len(line_pairs), self.batch_size):
-      x_batch, y_batch = zip(*line_pairs[batch_start:batch_start+self.batch_size])
-      if len(x_batch) < self.batch_size:
-        break
-      self.batches.append((x_batch, y_batch))
+def add_sos_eos(tokens):
+  return map(lambda token_list: [nlc_data.SOS_ID] + token_list + [nlc_data.EOS_ID], tokens)
 
-    random.shuffle(self.batches)
+def padded(tokens, depth):
+  maxlen = max(map(lambda x: len(x), tokens))
+  align = pow(2, depth - 1)
+  padlen = maxlen + (align - maxlen) % align
+  return map(lambda token_list: token_list + [nlc_data.PAD_ID] * (padlen - len(token_list)), tokens)
 
-  def next(self):
-    if len(self.batches) == 0:
-      self.refill()
-    if len(self.batches) == 0:
-      raise StopIteration()
+def pair_iter(fnamex, fnamey, batch_size, num_layers):
+  fdx, fdy = open(fnamex), open(fnamey)
+  batches = []
 
-    def add_sos_eos(tokens):
-      return map(lambda token_list: [nlc_data.SOS_ID] + token_list + [nlc_data.EOS_ID], tokens)
+  while True:
+    if len(batches) == 0:
+      refill(batches, fdx, fdy, batch_size)
+    if len(batches) == 0:
+      break
 
-    def padded(tokens, depth):
-      maxlen = max(map(lambda x: len(x), tokens))
-      align = pow(2, depth - 1)
-      padlen = maxlen + (align - maxlen) % align
-      return map(lambda token_list: token_list + [nlc_data.PAD_ID] * (padlen - len(token_list)), tokens)
-
-    x_tokens, y_tokens = self.batches.pop(0)
+    x_tokens, y_tokens = batches.pop(0)
     y_tokens = add_sos_eos(y_tokens)
-    x_padded, y_padded = padded(x_tokens, self.num_layers), padded(y_tokens, 1)
+    x_padded, y_padded = padded(x_tokens, num_layers), padded(y_tokens, 1)
 
     source_tokens = np.array(x_padded).T
     source_mask = (source_tokens != nlc_data.PAD_ID).astype(np.int32)
     target_tokens = np.array(y_padded).T
     target_mask = (target_tokens != nlc_data.PAD_ID).astype(np.int32)
 
-    return source_tokens, source_mask, target_tokens, target_mask
+    yield (source_tokens, source_mask, target_tokens, target_mask)
+
+  return
 
 def create_model(session, vocab_size, forward_only):
   model = nlc_model.NLCModel(
@@ -134,7 +131,7 @@ def get_tokenizer(FLAGS):
 
 def validate(model, sess, x_dev, y_dev):
   valid_costs, valid_lengths = [], []
-  for source_tokens, source_mask, target_tokens, target_mask in PairIter(x_dev, y_dev, FLAGS.batch_size, FLAGS.num_layers):
+  for source_tokens, source_mask, target_tokens, target_mask in pair_iter(x_dev, y_dev, FLAGS.batch_size, FLAGS.num_layers):
     cost = model.test(sess, source_tokens, source_mask, target_tokens, target_mask)
     valid_costs.append(cost * target_mask.shape[1])
     valid_lengths.append(np.sum(target_mask[1:, :]))
@@ -177,7 +174,7 @@ def train():
       exp_norm = None
 
       ## Train
-      for source_tokens, source_mask, target_tokens, target_mask in PairIter(x_train, y_train, FLAGS.batch_size, FLAGS.num_layers):
+      for source_tokens, source_mask, target_tokens, target_mask in pair_iter(x_train, y_train, FLAGS.batch_size, FLAGS.num_layers):
         # Get a batch and make a step.
         tic = time.time()
 
