@@ -281,6 +281,8 @@ class NLCModel(object):
       output_bw, output_state_bw = rnn.dynamic_rnn(cell, inputs_bw, time_major=True, dtype=dtypes.float32,
                                                    sequence_length=lengths, scope=bw_scope)
 
+    output_bw = tf.reverse_sequence(output_bw, tf.to_int64(lengths), seq_dim=0, batch_dim=1)
+
     outputs = output_fw + output_bw
     output_state = output_state_fw + output_state_bw
 
