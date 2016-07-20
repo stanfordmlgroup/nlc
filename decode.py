@@ -28,11 +28,14 @@ import string
 import numpy as np
 from six.moves import xrange
 import tensorflow as tf
+import csv
+import itertools
 
 import kenlm
 
 import nlc_model
 import nlc_data
+from train import pair_iter
 
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate decays by this much.")
@@ -50,6 +53,7 @@ tf.app.flags.DEFINE_string("tokenizer", "CHAR", "Set to WORD to train word level
 tf.app.flags.DEFINE_integer("beam_size", 8, "Size of beam.")
 tf.app.flags.DEFINE_string("lmfile", None, "arpa file of the language model.")
 tf.app.flags.DEFINE_float("alpha", 0.3, "Language model relative weight.")
+tf.app.flags.DEFINE_boolean("dev", False, "generate dev outputs with batch_decode")
 
 FLAGS = tf.app.flags.FLAGS
 reverse_vocab, vocab = None, None
@@ -100,6 +104,12 @@ def detokenize(sents, reverse_vocab):
     return outsent
   return [detok_sent(s) for s in sents]
 
+def detokenize_tgt(toks, vocab):
+  outsent = ''
+  for t in toks:
+    if t >= len(nlc_data._START_VOCAB) and t != nlc_data._PAD:
+      outsent += vocab[t]
+  return outsent
 
 def lm_rank(strs, probs):
   if lm is None:
@@ -155,8 +165,58 @@ def decode():
 
       print("Candidate: ", output_sent)
 
+def batch_decode():
+  # decode for dev-sets, in batches
+  global reverse_vocab, vocab, lm
+
+  if FLAGS.lmfile is not None:
+    print("Loading Language model from %s" % FLAGS.lmfile)
+    lm = kenlm.LanguageModel(FLAGS.lmfile)
+
+  print("Preparing NLC data in %s" % FLAGS.data_dir)
+
+  x_train, y_train, x_dev, y_dev, vocab_path = nlc_data.prepare_nlc_data(
+    FLAGS.data_dir + '/' + FLAGS.tokenizer.lower(), FLAGS.max_vocab_size,
+    tokenizer=get_tokenizer(FLAGS))
+  vocab, reverse_vocab = nlc_data.initialize_vocabulary(vocab_path)
+  vocab_size = len(vocab)
+  print("Vocabulary size: %d" % vocab_size)
+
+  with tf.Session() as sess:
+    print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
+    model = create_model(sess, vocab_size, False)
+
+    error_source = []
+    error_target = []
+
+    for source_tokens, source_mask, target_tokens, target_mask in pair_iter(x_dev, y_dev, 1,
+                                                                            FLAGS.num_layers):
+      # Encode
+      encoder_output = model.encode(sess, source_tokens, source_mask)
+      # Decode
+      beam_toks, probs = decode_beam(model, sess, encoder_output, FLAGS.beam_size)
+      # De-tokenize
+      beam_strs = detokenize(beam_toks, reverse_vocab)
+      # Language Model ranking
+      best_str = lm_rank(beam_strs, probs)
+
+      tgt_sent = detokenize_tgt(target_tokens, vocab)
+      if best_str != tgt_sent:
+        # see if this is too stupid, or doesn't work at all
+        error_source.append(best_str)
+        error_target.append(tgt_sent)
+
+    # dump it out in train_dir
+    with open(FLAGS.train_dir + "/" + "err_val.txt", 'wb') as f:
+      wrt = csv.writer(f)
+      for s, t in itertools.izip(error_source, error_target):
+        wrt.writerow([t, s]) # correct, wrong
+
 def main(_):
-  decode()
+  if not FLAGS.dev:
+    decode()
+  else:
+    batch_decode()
 
 if __name__ == "__main__":
   tf.app.run()
