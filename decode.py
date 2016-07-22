@@ -188,6 +188,7 @@ def batch_decode():
 
     error_source = []
     error_target = []
+    error_generated = []
 
     for source_tokens, source_mask, target_tokens, target_mask in pair_iter(x_dev, y_dev, 1,
                                                                             FLAGS.num_layers):
@@ -200,18 +201,24 @@ def batch_decode():
       # Language Model ranking
       best_str = lm_rank(beam_strs, probs)
 
+      src_sent = detokenize_tgt(source_tokens, reverse_vocab)
       tgt_sent = detokenize_tgt(target_tokens, reverse_vocab)
 
       if best_str != tgt_sent:
         # see if this is too stupid, or doesn't work at all
-        error_source.append(best_str)
+        error_source.append(src_sent)
         error_target.append(tgt_sent)
+        error_generated.append(best_str)
+
+    print("outputting in csv file...")
 
     # dump it out in train_dir
-    with open(FLAGS.train_dir + "/" + "err_val.txt", 'wb') as f:
+    with open(FLAGS.train_dir + "/" + "err_val.csv", 'wb') as f:
       wrt = csv.writer(f)
-      for s, t in itertools.izip(error_source, error_target):
-        wrt.writerow([t, s]) # correct, wrong
+      for s, t, g in itertools.izip(error_source, error_target, error_generated):
+        wrt.writerow([s, t, g]) # source, correct target, wrong target
+
+    print("csv file finished")
 
 def main(_):
   if not FLAGS.dev:
