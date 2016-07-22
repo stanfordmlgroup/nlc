@@ -35,7 +35,7 @@ import kenlm
 
 import nlc_model
 import nlc_data
-from train import pair_iter
+from util import pair_iter
 
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate decays by this much.")
