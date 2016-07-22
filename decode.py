@@ -104,11 +104,11 @@ def detokenize(sents, reverse_vocab):
     return outsent
   return [detok_sent(s) for s in sents]
 
-def detokenize_tgt(toks, vocab):
+def detokenize_tgt(toks, reverse_vocab):
   outsent = ''
-  for t in toks:
-    if t >= len(nlc_data._START_VOCAB) and t != nlc_data._PAD:
-      outsent += vocab[t]
+  for i in range(toks.shape[0]):
+    if toks[i] >= len(nlc_data._START_VOCAB) and toks[i] != nlc_data._PAD:
+      outsent += reverse_vocab[toks[i][0]]
   return outsent
 
 def lm_rank(strs, probs):
@@ -200,7 +200,8 @@ def batch_decode():
       # Language Model ranking
       best_str = lm_rank(beam_strs, probs)
 
-      tgt_sent = detokenize_tgt(target_tokens, vocab)
+      tgt_sent = detokenize_tgt(target_tokens, reverse_vocab)
+
       if best_str != tgt_sent:
         # see if this is too stupid, or doesn't work at all
         error_source.append(best_str)
