@@ -165,7 +165,7 @@ def decode():
 
       print("Candidate: ", output_sent)
 
-def setup_batch_decode():
+def setup_batch_decode(sess):
   # decode for dev-sets, in batches
   global reverse_vocab, vocab, lm
 
@@ -182,11 +182,10 @@ def setup_batch_decode():
   vocab_size = len(vocab)
   print("Vocabulary size: %d" % vocab_size)
 
-  with tf.Session() as sess:
-    print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
-    model = create_model(sess, vocab_size, False)
+  print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
+  model = create_model(sess, vocab_size, False)
 
-  return model, sess, x_dev, y_dev
+  return model, x_dev, y_dev
 
 
 def batch_decode(model, sess, x_dev, y_dev, alpha):
@@ -231,10 +230,11 @@ def main(_):
     decode()
   else:
     alpha = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    model, sess, x_dev, y_dev = setup_batch_decode()
-    for a in alpha:
-      FLAGS.alpha = a
-      batch_decode(model, sess, x_dev, y_dev, a)
+    with tf.Session() as sess:
+      model, x_dev, y_dev = setup_batch_decode(sess)
+      for a in alpha:
+        FLAGS.alpha = a
+        batch_decode(model, sess, x_dev, y_dev, a)
 
 if __name__ == "__main__":
   tf.app.run()
