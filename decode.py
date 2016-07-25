@@ -165,7 +165,7 @@ def decode():
 
       print("Candidate: ", output_sent)
 
-def batch_decode(alpha=FLAGS.alpha):
+def setup_batch_decode():
   # decode for dev-sets, in batches
   global reverse_vocab, vocab, lm
 
@@ -185,6 +185,11 @@ def batch_decode(alpha=FLAGS.alpha):
   with tf.Session() as sess:
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, vocab_size, False)
+
+  return model, sess, x_dev, y_dev
+
+
+def batch_decode(model, sess, x_dev, y_dev, alpha):
 
     error_source = []
     error_target = []
@@ -216,18 +221,20 @@ def batch_decode(alpha=FLAGS.alpha):
     with open(FLAGS.train_dir + "/" + "err_val_alpha_" + str(alpha) + ".csv", 'wb') as f:
       wrt = csv.writer(f)
       for s, t, g in itertools.izip(error_source, error_target, error_generated):
-        wrt.writerow([s, t, g]) # source, correct target, wrong target
+        wrt.writerow([s, t, g])  # source, correct target, wrong target
 
     print("err_val_alpha_" + str(alpha) + ".csv" + "file finished")
+
 
 def main(_):
   if not FLAGS.dev:
     decode()
   else:
     alpha = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    model, sess, x_dev, y_dev = setup_batch_decode()
     for a in alpha:
       FLAGS.alpha = a
-      batch_decode(a)
+      batch_decode(model, sess, x_dev, y_dev, a)
 
 if __name__ == "__main__":
   tf.app.run()
