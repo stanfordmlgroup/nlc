@@ -165,7 +165,7 @@ def decode():
 
       print("Candidate: ", output_sent)
 
-def batch_decode():
+def batch_decode(alpha=FLAGS.alpha):
   # decode for dev-sets, in batches
   global reverse_vocab, vocab, lm
 
@@ -213,18 +213,21 @@ def batch_decode():
     print("outputting in csv file...")
 
     # dump it out in train_dir
-    with open(FLAGS.train_dir + "/" + "err_val.csv", 'wb') as f:
+    with open(FLAGS.train_dir + "/" + "err_val_alpha_" + str(alpha) + ".csv", 'wb') as f:
       wrt = csv.writer(f)
       for s, t, g in itertools.izip(error_source, error_target, error_generated):
         wrt.writerow([s, t, g]) # source, correct target, wrong target
 
-    print("csv file finished")
+    print("err_val_alpha_" + str(alpha) + ".csv" + "file finished")
 
 def main(_):
   if not FLAGS.dev:
     decode()
   else:
-    batch_decode()
+    alpha = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    for a in alpha:
+      FLAGS.alpha = a
+      batch_decode(a)
 
 if __name__ == "__main__":
   tf.app.run()
