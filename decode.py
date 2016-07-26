@@ -115,6 +115,7 @@ def lm_rank(strs, probs):
   if lm is None:
     return strs[0]
   a = FLAGS.alpha
+  print("ranking with a = " + str(a))
   rescores = [(1-a)*p + a*lm.score(s) for (s, p) in zip(strs, probs)]
   rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x:x[1])]
   return strs[rerank[-1]]
@@ -217,7 +218,7 @@ def batch_decode(model, sess, x_dev, y_dev, alpha):
     print("outputting in csv file...")
 
     # dump it out in train_dir
-    with open(FLAGS.train_dir + "/" + "err_val_alpha_" + str(alpha) + ".csv", 'wb') as f:
+    with open(FLAGS.train_dir + "/err_analysis/" + "err_val_alpha_" + str(alpha) + ".csv", 'wb') as f:
       wrt = csv.writer(f)
       for s, t, g in itertools.izip(error_source, error_target, error_generated):
         wrt.writerow([s, t, g])  # source, correct target, wrong target
@@ -229,7 +230,7 @@ def main(_):
   if not FLAGS.dev:
     decode()
   else:
-    alpha = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    alpha = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
     with tf.Session() as sess:
       model, x_dev, y_dev = setup_batch_decode(sess)
       for a in alpha:
