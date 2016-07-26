@@ -115,7 +115,6 @@ def lm_rank(strs, probs):
   if lm is None:
     return strs[0]
   a = FLAGS.alpha
-  print("ranking with a = " + str(a))
   rescores = [(1-a)*p + a*lm.score(s) for (s, p) in zip(strs, probs)]
   rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x:x[1])]
   return strs[rerank[-1]]
@@ -235,6 +234,7 @@ def main(_):
       model, x_dev, y_dev = setup_batch_decode(sess)
       for a in alpha:
         FLAGS.alpha = a
+        print("ranking with alpha = " + str(FLAGS.alpha))
         batch_decode(model, sess, x_dev, y_dev, a)
 
 if __name__ == "__main__":
