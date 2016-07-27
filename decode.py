@@ -54,6 +54,7 @@ tf.app.flags.DEFINE_integer("beam_size", 8, "Size of beam.")
 tf.app.flags.DEFINE_string("lmfile", None, "arpa file of the language model.")
 tf.app.flags.DEFINE_float("alpha", 0.3, "Language model relative weight.")
 tf.app.flags.DEFINE_boolean("dev", False, "generate dev outputs with batch_decode")
+tf.app.flags.DEFINE_boolean("sweep", False, "sweep all alpha rates with dev turned on")
 
 FLAGS = tf.app.flags.FLAGS
 reverse_vocab, vocab = None, None
@@ -229,13 +230,19 @@ def main(_):
   if not FLAGS.dev:
     decode()
   else:
-    alpha = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-    with tf.Session() as sess:
-      model, x_dev, y_dev = setup_batch_decode(sess)
-      for a in alpha:
-        FLAGS.alpha = a
+    if FLAGS.sweep:
+      alpha = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+      with tf.Session() as sess:
+        model, x_dev, y_dev = setup_batch_decode(sess)
+        for a in alpha:
+          FLAGS.alpha = a
+          print("ranking with alpha = " + str(FLAGS.alpha))
+          batch_decode(model, sess, x_dev, y_dev, a)
+    else:
+      with tf.Session() as sess:
+        model, x_dev, y_dev = setup_batch_decode(sess)
         print("ranking with alpha = " + str(FLAGS.alpha))
-        batch_decode(model, sess, x_dev, y_dev, a)
+        batch_decode(model, sess, x_dev, y_dev, FLAGS.alpha)
 
 if __name__ == "__main__":
   tf.app.run()
