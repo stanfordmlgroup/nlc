@@ -135,8 +135,9 @@ def lm_rank_score(strs, target, probs):
   rescores = [(1 - a) * p + a * lm.score(s) for (s, p) in zip(strs, probs)]
   rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x: x[1])]
   tgt_score = lm.score(target)
-  rerank_score = lm.score(strs[rerank[-1]])  # must set alpha=1 to get pure lm score
-  return strs[rerank[-1]], tgt_score, rerank_score
+  generated = strs[rerank[-1]]
+  rerank_score = lm.score(generated)  # must set alpha=1 to get pure lm score
+  return generated, tgt_score, rerank_score
 
 def decode_beam(model, sess, encoder_output, max_beam_size):
   toks, probs = model.decode_beam(sess, encoder_output, beam_size=max_beam_size)
@@ -239,14 +240,14 @@ def batch_decode(model, sess, x_dev, y_dev, alpha):
         error_generated.append(best_str)
         if FLAGS.score:
           target_score.append(tgt_score)
-          generated_score.append(generated_score)
+          generated_score.append(rerank_score)
       else:
         correct_source.append(src_sent)
         correct_target.append(tgt_sent)
         correct_generated.append(best_str)
         if FLAGS.score:
           correct_target_score.append(tgt_score)
-          correct_generated_score.append(generated_score)
+          correct_generated_score.append(rerank_score)
 
     print("outputting in csv file...")
 
