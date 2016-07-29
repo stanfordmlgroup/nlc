@@ -207,6 +207,7 @@ def batch_decode(model, sess, x_dev, y_dev, alpha):
     # dump it out in train_dir
     with open(FLAGS.train_dir + "/err_analysis/" + "err_val_alpha_" + str(alpha) + ".csv", 'wb') as f:
       wrt = csv.writer(f)
+      wrt.writerow(['Bad Input', 'Ground Truth', 'Network Score', 'LM Score', 'Generated Hypothesis', 'Combined Score', 'Network Score', 'LM Score'])
       if not FLAGS.score:
         for s, t, g in itertools.izip(error_source, error_target, error_generated):
           wrt.writerow([s, t, g])  # source, correct target, wrong target
