@@ -154,9 +154,9 @@ def train():
 
       print("Epoch %d Validation cost: %f" % (epoch, valid_cost))
 
-      previous_losses.append(valid_cost)
       if len(previous_losses) > 2 and valid_cost > max(previous_losses[-3:]):
         sess.run(model.learning_rate_decay_op)
+      previous_losses.append(valid_cost)
       sys.stdout.flush()
 
 def main(_):
