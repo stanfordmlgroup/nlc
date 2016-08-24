@@ -43,8 +43,8 @@ UNK_ID = 3
 _WORD_SPLIT = re.compile(b"([.,!?\"':;)(])")
 _DIGIT_RE = re.compile(br"\d")
 
-_NLC_TRAIN_URL = "http://neuron.stanford.edu/nlc/nlc-train.tar"
-_NLC_DEV_URL = "http://neuron.stanford.edu/nlc/nlc-dev.tar"
+_NLC_TRAIN_URL = "http://neuron.stanford.edu/nlc/data/nlc-train.tar"
+_NLC_DEV_URL = "http://neuron.stanford.edu/nlc/data/nlc-dev.tar"
 
 
 def maybe_download(directory, filename, url):
