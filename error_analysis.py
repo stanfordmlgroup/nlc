@@ -93,10 +93,12 @@ def detokenize(sents, reverse_vocab):
 def network_score(model, sess, encoder_output, target_tokens):
   score = 0.0
   states = None
+  cnt = 0
   for (feed, pick) in zip(list(target_tokens)[:-1], list(target_tokens)[1:]):
     scores, _, states = model.decode(sess, encoder_output, np.array([feed]), None, states)
     score += float(scores[0, 0, pick])
-  return score
+    cnt += 1
+  return score / cnt
 
 def detokenize_tgt(toks, reverse_vocab):
   outsent = ''
@@ -124,7 +126,8 @@ def lm_rank_score(strs, probs):
   if lm is None:
     return strs[0]
   a = FLAGS.alpha
-  lmscores = [lm.score(s) for s in strs]
+  lmscores = [lm.score(s)/(1+len(s.split())) for s in strs]
+  probs = [ p / (len(s)+1) for (s, p) in zip(strs, probs) ]
   rescores = [(1 - a) * p + a * l for (l, p) in zip(lmscores, probs)]
   rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x: x[1])]
   generated = strs[rerank[-1]]
@@ -189,7 +192,7 @@ def batch_decode(model, sess, x_dev, y_dev, alpha):
         best_str = lm_rank(beam_strs, probs)
       else:
         best_str, rerank_score, nw_score, lm_score = lm_rank_score(beam_strs, probs)
-        tgt_lm_score = lm.score(tgt_sent)
+        tgt_lm_score = lm.score(tgt_sent) / len(tgt_sent.split())
 
       # see if this is too stupid, or doesn't work at all
       error_source.append(src_sent)
@@ -205,7 +208,7 @@ def batch_decode(model, sess, x_dev, y_dev, alpha):
     print("outputting in csv file...")
 
     # dump it out in train_dir
-    with open(FLAGS.train_dir + "/err_analysis/" + "err_val_alpha_" + str(alpha) + ".csv", 'wb') as f:
+    with open("err_val_alpha_" + str(alpha) + ".csv", 'wb') as f:
       wrt = csv.writer(f)
       wrt.writerow(['Bad Input', 'Ground Truth', 'Network Score', 'LM Score', 'Generated Hypothesis', 'Combined Score', 'Network Score', 'LM Score'])
       if not FLAGS.score:

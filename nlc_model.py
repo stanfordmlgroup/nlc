@@ -250,6 +250,8 @@ class NLCModel(object):
     return tf.nn.dropout(inp, self.keep_prob)
 
   def downscale(self, inp, mask):
+    return inp, mask
+
     with vs.variable_scope("Downscale"):
       inshape = tf.shape(inp)
       T, batch_size, dim = inshape[0], inshape[1], inshape[2]

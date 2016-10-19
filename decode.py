@@ -105,9 +105,25 @@ def lm_rank(strs, probs):
   if lm is None:
     return strs[0]
   a = FLAGS.alpha
-  rescores = [(1-a)*p + a*lm.score(s) for (s, p) in zip(strs, probs)]
-  rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x:x[1])]
-  return strs[rerank[-1]]
+  lmscores = [lm.score(s)/(1+len(s.split())) for s in strs]
+  probs = [ p / (len(s)+1) for (s, p) in zip(strs, probs) ]
+  for (s, p, l) in zip(strs, probs, lmscores):
+    print(s, p, l)
+
+  rescores = [(1 - a) * p + a * l for (l, p) in zip(lmscores, probs)]
+  rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x: x[1])]
+  generated = strs[rerank[-1]]
+  lm_score = lmscores[rerank[-1]]
+  nw_score = probs[rerank[-1]]
+  score = rescores[rerank[-1]]
+  return generated #, score, nw_score, lm_score
+
+#  if lm is None:
+#    return strs[0]
+#  a = FLAGS.alpha
+#  rescores = [(1-a)*p + a*lm.score(s) for (s, p) in zip(strs, probs)]
+#  rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x:x[1])]
+#  return strs[rerank[-1]]
 
 def decode_beam(model, sess, encoder_output, max_beam_size):
   toks, probs = model.decode_beam(sess, encoder_output, beam_size=max_beam_size)

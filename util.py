@@ -69,8 +69,8 @@ def refill(batches, fdx, fdy, batch_size):
 
   for batch_start in xrange(0, len(line_pairs), batch_size):
     x_batch, y_batch = zip(*line_pairs[batch_start:batch_start+batch_size])
-    if len(x_batch) < batch_size:
-      break
+#    if len(x_batch) < batch_size:
+#      break
     batches.append((x_batch, y_batch))
 
   random.shuffle(batches)
