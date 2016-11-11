@@ -34,6 +34,10 @@ import kenlm
 import nlc_model
 import nlc_data
 
+from language_model import LM
+from common_custom import CheckpointLoader
+from data_utils import Vocabulary, Dataset
+
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
@@ -51,9 +55,17 @@ tf.app.flags.DEFINE_integer("beam_size", 8, "Size of beam.")
 tf.app.flags.DEFINE_string("lmfile", None, "arpa file of the language model.")
 tf.app.flags.DEFINE_float("alpha", 0.3, "Language model relative weight.")
 
+# LM 1B configurations.
+tf.app.flags.DEFINE_string("temp_str_path", "/tmp/encdec-tmp", "Where the file with one string will be located.")
+tf.app.flags.DEFINE_string("hpconfig", "", "Overrides default hyper-parameters.")
+tf.app.flags.DEFINE_integer("num_gpus", 1, "Number of GPUs used.")
+tf.app.flags.DEFINE_string("vocab_path", "1b_word_vocab.txt", "Overrides default vocab file path.")
+tf.app.flags.DEFINE_string("lm1b_ckpt", "", "ckpt file of a trained LM 1B model.")
+
 FLAGS = tf.app.flags.FLAGS
 reverse_vocab, vocab = None, None
-lm = None
+lm, lm_vocab, lm_hps = None, None, None
+
 
 def create_model(session, vocab_size, forward_only):
   model = nlc_model.NLCModel(
@@ -101,11 +113,35 @@ def detokenize(sents, reverse_vocab):
   return [detok_sent(s) for s in sents]
 
 
-def lm_rank(strs, probs):
+def get_lm_perplexity(s, sess):
+  print s
+  # Yeah this is impractical, but we first just want
+  # to see results!
+  with open(FLAGS.temp_str_path, 'w') as f:
+    f.write(s)
+  dataset = Dataset(lm_vocab, FLAGS.temp_str_path, deterministic=True) 
+  data_iterator = dataset.iterate_once(lm_hps.batch_size * lm_hps.num_gpus, lm_hps.num_steps)
+  loss_nom = 0.0
+  loss_den = 0.0
+  for i, (x, y, w) in enumerate(data_iterator):
+    loss = sess.run(lm.loss, {lm.x: x, lm.y: y, lm.w: w})
+    loss_nom += loss
+    loss_den += w.mean()
+    loss = loss_nom / loss_den
+    print("%d: %.3f (%.3f) ... " % (i, loss, np.exp(loss)))
+  
+  log_perplexity = loss_nom / loss_den
+  print("Results at %d: log_perplexity = %.3f perplexity = %.3f" % (
+global_step, log_perplexity, np.exp(log_perplexity)))
+  return np.exp(log_perplexity)
+
+def lm_rank(strs, probs, sess):
   if lm is None:
     return strs[0]
   a = FLAGS.alpha
-  lmscores = [lm.score(s)/(1+len(s.split())) for s in strs]
+  # This is the only line that needs to be changed to accomodate a
+  # new LM.
+  lmscores = [ (-1.0 * get_lm_perplexity(s, sess))/(1+len(s.split())) for s in strs ]
   probs = [ p / (len(s)+1) for (s, p) in zip(strs, probs) ]
   for (s, p, l) in zip(strs, probs, lmscores):
     print(s, p, l)
@@ -139,17 +175,31 @@ def fix_sent(model, sess, sent):
   # De-tokenize
   beam_strs = detokenize(beam_toks, reverse_vocab)
   # Language Model ranking
-  best_str = lm_rank(beam_strs, probs)
+  best_str = lm_rank(beam_strs, probs, sess)
   # Return
   return best_str
 
 def decode():
   # Prepare NLC data.
-  global reverse_vocab, vocab, lm
+  global reverse_vocab, vocab, lm, lm_vocab, lm_hps
 
-  if FLAGS.lmfile is not None:
-    print("Loading Language model from %s" % FLAGS.lmfile)
-    lm = kenlm.LanguageModel(FLAGS.lmfile)
+  lm_hps = LM.get_default_hparams().parse(FLAGS.hpconfig)
+  lm_hps.num_gpus = FLAGS.num_gpus
+
+  lm_vocab = Vocabulary.from_file(FLAGS.vocab_path)
+
+  with tf.variable_scope("model"):
+    lm_hps.num_sampled = 0  # Always using full softmax at evaluation.
+    lm_hps.keep_prob = 1.0
+    lm = LM(lm_hps, "eval", "/cpu:0")
+
+  if lm_hps.average_params:
+    print("Averaging parameters for evaluation.")
+    saver = tf.train.Saver(lm.avg_dict)
+  else:
+    saver = tf.train.Saver()
+
+  ckpt_loader = CheckpointLoader(saver, lm.global_step, logdir + "/train", FLAGS.lm1b_ckpt)
 
   print("Preparing NLC data in %s" % FLAGS.data_dir)
 
@@ -161,6 +211,13 @@ def decode():
   print("Vocabulary size: %d" % vocab_size)
 
   with tf.Session() as sess:
+    if not ckpt_loader.load_checkpoint():
+      print("Error loading LM checkpoint!")
+      return
+    
+    print("Loaded checkpoint " + repr(ckpt_loader.last_global_step))
+    tf.initialize_local_variables().run()
+
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, vocab_size, False)
 
