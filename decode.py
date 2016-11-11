@@ -130,9 +130,9 @@ def get_lm_perplexity(s, sess):
     print("%d: %.3f (%.3f) ... " % (i, loss, np.exp(loss)))
   
   log_perplexity = loss_nom / loss_den
-  print("Results at %d: log_perplexity = %.3f perplexity = %.3f" % (
-global_step, log_perplexity, np.exp(log_perplexity)))
+  print("Results: log_perplexity = %.3f perplexity = %.3f" % (log_perplexity, np.exp(log_perplexity)))
   return np.exp(log_perplexity)
+
 
 def lm_rank(strs, probs, sess):
   if lm is None:
@@ -209,14 +209,22 @@ def decode():
   vocab_size = len(vocab)
   print("Vocabulary size: %d" % vocab_size)
 
-  with tf.Session() as sess:
+  config = tf.ConfigProto(allow_soft_placement=True,
+                          intra_op_parallelism_threads=20,
+                          inter_op_parallelism_threads=1)
+  sess = tf.Session(config=config)
+  with sess.as_default():
     if not ckpt_loader.load_checkpoint():
       print("Error loading LM checkpoint!")
       return
     
     print("Loaded checkpoint " + repr(ckpt_loader.last_global_step))
-    tf.initialize_local_variables().run()
-
+    sess.run(tf.initialize_local_variables())
+    
+    # Quick sanity check
+    #print(lm_rank(['this a sent ence is vewy bad', 'this sentence is great !'], [0.9, 0.1], sess))
+    #return
+    
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, vocab_size, False)
 
