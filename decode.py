@@ -29,8 +29,6 @@ import numpy as np
 from six.moves import xrange
 import tensorflow as tf
 
-import kenlm
-
 import nlc_model
 import nlc_data
 
@@ -59,6 +57,7 @@ tf.app.flags.DEFINE_float("alpha", 0.3, "Language model relative weight.")
 tf.app.flags.DEFINE_string("temp_str_path", "/tmp/encdec-tmp", "Where the file with one string will be located.")
 tf.app.flags.DEFINE_string("hpconfig", "", "Overrides default hyper-parameters.")
 tf.app.flags.DEFINE_integer("num_gpus", 1, "Number of GPUs used.")
+tf.app.flags.DEFINE_string("log_dir", "/tmp", "")
 tf.app.flags.DEFINE_string("vocab_path", "1b_word_vocab.txt", "Overrides default vocab file path.")
 tf.app.flags.DEFINE_string("lm1b_ckpt", "", "ckpt file of a trained LM 1B model.")
 
@@ -114,7 +113,7 @@ def detokenize(sents, reverse_vocab):
 
 
 def get_lm_perplexity(s, sess):
-  print s
+  print(s)
   # Yeah this is impractical, but we first just want
   # to see results!
   with open(FLAGS.temp_str_path, 'w') as f:
@@ -199,7 +198,7 @@ def decode():
   else:
     saver = tf.train.Saver()
 
-  ckpt_loader = CheckpointLoader(saver, lm.global_step, logdir + "/train", FLAGS.lm1b_ckpt)
+  ckpt_loader = CheckpointLoader(saver, lm.global_step, FLAGS.log_dir + "/train", FLAGS.lm1b_ckpt)
 
   print("Preparing NLC data in %s" % FLAGS.data_dir)
 
