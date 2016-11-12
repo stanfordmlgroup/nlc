@@ -202,12 +202,12 @@ def decode():
 
   print("Preparing NLC data in %s" % FLAGS.data_dir)
 
-  x_train, y_train, x_dev, y_dev, vocab_path = nlc_data.prepare_nlc_data(
-    FLAGS.data_dir + '/' + FLAGS.tokenizer.lower(), FLAGS.max_vocab_size,
-    tokenizer=get_tokenizer(FLAGS))
-  vocab, reverse_vocab = nlc_data.initialize_vocabulary(vocab_path)
-  vocab_size = len(vocab)
-  print("Vocabulary size: %d" % vocab_size)
+  #x_train, y_train, x_dev, y_dev, vocab_path = nlc_data.prepare_nlc_data(
+  #  FLAGS.data_dir + '/' + FLAGS.tokenizer.lower(), FLAGS.max_vocab_size,
+  #  tokenizer=get_tokenizer(FLAGS))
+  #vocab, reverse_vocab = nlc_data.initialize_vocabulary(vocab_path)
+  #vocab_size = len(vocab)
+  #print("Vocabulary size: %d" % vocab_size)
 
   config = tf.ConfigProto(allow_soft_placement=True,
                           intra_op_parallelism_threads=20,
@@ -225,6 +225,21 @@ def decode():
     #print(lm_rank(['this a sent ence is vewy bad', 'this sentence is great !'], [0.9, 0.1], sess))
     #return
     
+    # Running LM 1B on the first 1000 sentences of train.
+    top_n = 1000
+    bad = [line.strip().rstrip('\n') for line in open('/deep/u/borisi/sdlg/nlc/char/train.x.txt', 'r')]
+    good = [line.strip().rstrip('\n') for line in open('/deep/u/borisi/sdlg/nlc/char/train.y.txt', 'r')]
+    ppls = list()
+    for idx in xrange(len(good[:top_n])):
+      ppl_pair = (get_lm_perplexity(good[idx], sess), get_lm_perplexity(bad[idx], sess))
+      ppls.append(ppl_pair)
+      if ppl_pair[0] > ppl_pair[1]:
+        print("==PPL_NOTICE== Good had higher ppl than bad for GOOD: %.3f %s --- BAD: %.3f %s" % (ppl_pair[0], good[idx], ppl_pair[1], bad[idx]))
+      # Make it write out after each sentence pair
+      sys.stdout.flush()
+ 
+    return
+
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, vocab_size, False)
 
