@@ -58,7 +58,7 @@ tf.app.flags.DEFINE_string("temp_str_path", "/tmp/encdec-tmp", "Where the file w
 tf.app.flags.DEFINE_string("hpconfig", "", "Overrides default hyper-parameters.")
 tf.app.flags.DEFINE_integer("num_gpus", 1, "Number of GPUs used.")
 tf.app.flags.DEFINE_string("log_dir", "/tmp", "")
-tf.app.flags.DEFINE_string("vocab_path", "1b_word_vocab.txt", "Overrides default vocab file path.")
+tf.app.flags.DEFINE_string("vocab_path", "/deep/group/nlp_data/lm1b/1b_word_vocab.txt", "Overrides default vocab file path.")
 tf.app.flags.DEFINE_string("lm1b_ckpt", "", "ckpt file of a trained LM 1B model.")
 
 FLAGS = tf.app.flags.FLAGS
