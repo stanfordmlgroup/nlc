@@ -36,6 +36,8 @@ from language_model import LM
 from common_custom import CheckpointLoader
 from data_utils import Vocabulary, Dataset
 
+import nltk
+
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
@@ -118,17 +120,19 @@ def get_lm_perplexity(s, sess):
   # to see results!
   with open(FLAGS.temp_str_path, 'w') as f:
     f.write(s)
-  dataset = Dataset(lm_vocab, FLAGS.temp_str_path, deterministic=True) 
+  dataset = Dataset(lm_vocab, FLAGS.temp_str_path, deterministic=True)
   data_iterator = dataset.iterate_once(lm_hps.batch_size * lm_hps.num_gpus, lm_hps.num_steps)
   loss_nom = 0.0
   loss_den = 0.0
   for i, (x, y, w) in enumerate(data_iterator):
     loss = sess.run(lm.loss, {lm.x: x, lm.y: y, lm.w: w})
     loss_nom += loss
+    # NOTE Confusing line, due to multiplying by w mask then averaging over unmasked size
+    # when computing the loss
     loss_den += w.mean()
     loss = loss_nom / loss_den
     print("%d: %.3f (%.3f) ... " % (i, loss, np.exp(loss)))
-  
+
   log_perplexity = loss_nom / loss_den
   print("Results: log_perplexity = %.3f perplexity = %.3f" % (log_perplexity, np.exp(log_perplexity)))
   return np.exp(log_perplexity)
@@ -217,27 +221,29 @@ def decode():
     if not ckpt_loader.load_checkpoint():
       print("Error loading LM checkpoint!")
       return
-    
+
     print("Loaded checkpoint " + repr(ckpt_loader.last_global_step))
     sess.run(tf.initialize_local_variables())
-    
+
     # Quick sanity check
     #print(lm_rank(['this a sent ence is vewy bad', 'this sentence is great !'], [0.9, 0.1], sess))
     #return
-    
+
     # Running LM 1B on the first 1000 sentences of train.
-    top_n = 1000
-    bad = [line.strip().rstrip('\n') for line in open('/deep/u/borisi/sdlg/nlc/char/train.x.txt', 'r')]
-    good = [line.strip().rstrip('\n') for line in open('/deep/u/borisi/sdlg/nlc/char/train.y.txt', 'r')]
+    top_n = 400
+    #bad = [line.strip().rstrip('\n') for line in open('/deep/u/borisi/sdlg/nlc/char/train.x.txt', 'r')]
+    #good = [line.strip().rstrip('\n') for line in open('/deep/u/borisi/sdlg/nlc/char/train.y.txt', 'r')]
+    bad = [' '.join(nltk.word_tokenize(line.strip())) for line in open( '/deep/group/nlp_data/nlc_data/nlc_dev.x.txt', 'r')]
+    good = [' '.join(nltk.word_tokenize(line.strip())) for line in open('/deep/group/nlp_data/nlc_data/nlc_dev.y.txt', 'r')]
     for idx in xrange(len(good[:top_n])):
       ppl_pair = (get_lm_perplexity(good[idx], sess), get_lm_perplexity(bad[idx], sess))
-      ppl_pair = (ppl_pair[0]/(1+len(good[idx].split())), ppl_pair[1]/(1+len(bad[idx].split())))
+      #ppl_pair = (ppl_pair[0]/(1+len(good[idx].split())), ppl_pair[1]/(1+len(bad[idx].split())))
       print('(normed good ppl, normed bad ppl): %s', repr(ppl_pair))
       if ppl_pair[0] > ppl_pair[1]:
         print("==PPL_NOTICE== Normalized good ppl was higher than normalized bad ppl for GOOD: %.3f %s --- BAD: %.3f %s" % (ppl_pair[0], good[idx], ppl_pair[1], bad[idx]))
       # Make it write out after each sentence pair
       sys.stdout.flush()
- 
+
     return
 
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
