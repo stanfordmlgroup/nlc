@@ -152,11 +152,11 @@ class LM(object):
             num_delayed_steps=150,
             keep_prob=0.9,
 
-            vocab_size=793470,
+            vocab_size=50000,#793470,
             emb_size=512,
             state_size=2048,
             projected_size=512,
-            num_sampled=8192,
+            num_sampled=0,#8192,
             num_gpus=1,
 
             average_params=True,
