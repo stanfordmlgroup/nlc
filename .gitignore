@@ -1,1 +1,4 @@
 1b_word_vocab.txt
+*.txt
+*.pk
+multi-bleu.perl

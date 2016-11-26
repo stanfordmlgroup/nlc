@@ -34,6 +34,9 @@ import kenlm
 import nlc_model
 import nlc_data
 
+import cPickle as pickle
+from collections import defaultdict
+
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
@@ -49,7 +52,10 @@ tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
 tf.app.flags.DEFINE_string("tokenizer", "CHAR", "Set to WORD to train word level model.")
 tf.app.flags.DEFINE_integer("beam_size", 8, "Size of beam.")
 tf.app.flags.DEFINE_string("lmfile", None, "arpa file of the language model.")
-tf.app.flags.DEFINE_float("alpha", 0.3, "Language model relative weight.")
+tf.app.flags.DEFINE_string("alphas", "0.3,0.4", "Comma-separated anguage model relative weights to try.")
+tf.app.flags.DEFINE_string("input_file", None, "File containing input sentences")
+tf.app.flags.DEFINE_string("hyps_file", None, "Pickle file to write hypotheses and probabilities to for further scoring")
+tf.app.flags.DEFINE_string("sents_dir", None, "Directory hypotheses and probabilities to")
 
 FLAGS = tf.app.flags.FLAGS
 reverse_vocab, vocab = None, None
@@ -104,19 +110,26 @@ def detokenize(sents, reverse_vocab):
 def lm_rank(strs, probs):
   if lm is None:
     return strs[0]
-  a = FLAGS.alpha
   lmscores = [lm.score(s)/(1+len(s.split())) for s in strs]
   probs = [ p / (len(s)+1) for (s, p) in zip(strs, probs) ]
-  for (s, p, l) in zip(strs, probs, lmscores):
-    print(s, p, l)
+  print("lm scores and probs")
+  print(lmscores)
+  print(probs)
+  #for (s, p, l) in zip(strs, probs, lmscores):
+    #print(s, p, l)
 
-  rescores = [(1 - a) * p + a * l for (l, p) in zip(lmscores, probs)]
-  rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x: x[1])]
-  generated = strs[rerank[-1]]
-  lm_score = lmscores[rerank[-1]]
-  nw_score = probs[rerank[-1]]
-  score = rescores[rerank[-1]]
-  return generated #, score, nw_score, lm_score
+  alphas = [float(s) for s in FLAGS.alphas.split(",")]
+  sents = list()
+  for a in alphas:
+    rescores = [(1 - a) * p + a * l for (l, p) in zip(lmscores, probs)]
+    rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x: x[1])]
+    lm_score = lmscores[rerank[-1]]
+    nw_score = probs[rerank[-1]]
+    score = rescores[rerank[-1]]
+    generated = strs[rerank[-1]]
+    sents.append(generated)
+  #return generated #, score, nw_score, lm_score
+  return sents, FLAGS.alphas.split(",")
 
 #  if lm is None:
 #    return strs[0]
@@ -143,6 +156,15 @@ def fix_sent(model, sess, sent):
   # Return
   return best_str
 
+def get_hypotheses_and_probs(model, sess, sent):
+  # Tokenize
+  input_toks, mask = tokenize(sent, vocab)
+  # Encode
+  encoder_output = model.encode(sess, input_toks, mask)
+  # Decode
+  beam_toks, probs = decode_beam(model, sess, encoder_output, FLAGS.beam_size)
+  return beam_toks, probs
+
 def decode():
   # Prepare NLC data.
   global reverse_vocab, vocab, lm
@@ -159,17 +181,40 @@ def decode():
   vocab, reverse_vocab = nlc_data.initialize_vocabulary(vocab_path)
   vocab_size = len(vocab)
   print("Vocabulary size: %d" % vocab_size)
+  print("Vocabulary:")
+  print(vocab)
+
+  with open(FLAGS.input_file, 'r') as fin:
+    input_lines = fin.read().strip().split('\n')
 
   with tf.Session() as sess:
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, vocab_size, False)
 
-    while True:
-      sent = raw_input("Enter a sentence: ")
+    #while True:
+      #sent = raw_input("Enter a sentence: ")
 
-      output_sent = fix_sent(model, sess, sent)
+      #output_sent = fix_sent(model, sess, sent)
 
-      print("Candidate: ", output_sent)
+      #print("Candidate: ", output_sent)
+    hyps = list()
+    probs = list()
+    alpha_sents = defaultdict(list)
+    for input_line in input_lines:
+      #output_line = fix_sent(model, sess, input_line)
+      beam_toks, ps = get_hypotheses_and_probs(model, sess, input_line)
+      # Keep these around for re-ranking with different LMs
+      hyps.append(detokenize(beam_toks, reverse_vocab))
+      probs.append(ps)
+      sents, alphas = lm_rank(hyps[-1], ps)
+      for alpha, sent in zip(alphas, sents):
+        alpha_sents[alpha].append(sent)
+
+    if FLAGS.hyps_file is not None:
+      pickle.dump((hyps, probs), open(FLAGS.hyps_file, "wb"))
+    for alpha in alpha_sents:
+      with open(os.path.join(FLAGS.sents_dir, "alpha%s.txt" % alpha), "w") as fout:
+        fout.write('\n'.join(alpha_sents[alpha]))
 
 def main(_):
   decode()
