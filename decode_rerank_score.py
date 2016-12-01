@@ -5,14 +5,14 @@ from collections import defaultdict
 
 ALPHAS = "0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0"
 VISIBLE_DEVICES = "0,1"
-NLM_CKPT = "/deep/u/borisi/sdlg/lm/50k_train_logs/train/model.ckpt-355520"
+NLM_CKPT = "/deep/u/borisi/sdlg/lm/50k_train_logs/train/model.ckpt-670328"
 
 SRC_FILE = "/deep/group/nlp_data/nlc_data/nlc_dev.x.txt"
 TGT_FILE = "/deep/group/nlp_data/nlc_data/nlc_dev.y.txt"
 # Downloaded from https://raw.githubusercontent.com/moses-smt/mosesdecoder/master/scripts/generic/multi-bleu.perl
 MULTIBLEU = "multi-bleu.perl"
 
-BEAM_SIZE = 8
+BEAM_SIZE = 32
 
 HYPS_FILE = "hyps_beam%d.pk" % BEAM_SIZE
 NGRAM_OUTPUTS_DIR = "ngram_beam%d" % BEAM_SIZE
@@ -22,7 +22,7 @@ PLOT_FILE = "ngram_nlm_beam%d.pdf" % BEAM_SIZE
 # FIXME Currently outputs encoder-decoder hypotheses and scores
 # as well as beam search with n-gram result
 def decode(hyps_file, outputs_dir, alphas):
-  cmd = "CUDA_VISIBLE_DEVICES=%s python decode.py --data_dir /deep/group/nlp_data/nlc_data --train_dir /deep/u/avati/nlc/data --hpconfig num_layers=2 --vocab_path /deep/u/borisi/sdlg/lm/1b_word_vocab_50k.txt --input_file %s --lmfile /deep/group/zxie/lms/commoncrawl.5g.1f.binary --hyps_file %s --sents_dir %s --alphas %s --beam_size %d" % (VISIBLE_DEVICES, SRC_FILE, HYPS_FILE, NGRAM_OUTPUTS_DIR, ALPHAS, BEAM_SIZE)
+  cmd = "CUDA_VISIBLE_DEVICES=%s python decode.py --data_dir /deep/group/nlp_data/nlc_data --train_dir /deep/u/avati/nlc/data --hpconfig num_layers=2 --vocab_path /deep/u/borisi/sdlg/lm/1b_word_vocab_50k.txt --input_file %s --lmfile /deep/group/zxie/lms/commoncrawl.5g.1f.binary --hyps_file %s --sents_dir %s --alphas %s --beam_size %d" % (VISIBLE_DEVICES, SRC_FILE, hyps_file, outputs_dir, alphas, BEAM_SIZE)
   print(cmd)
   check_call(cmd, shell=True)
 
