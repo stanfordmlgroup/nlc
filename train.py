@@ -42,10 +42,11 @@ tf.app.flags.DEFINE_integer("epochs", 40, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("size", 400, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 3, "Number of layers in the model.")
 tf.app.flags.DEFINE_integer("max_vocab_size", 40000, "Vocabulary size limit.")
-tf.app.flags.DEFINE_integer("max_seq_len", 200, "Maximum sequence length.")
+#tf.app.flags.DEFINE_integer("max_seq_len", 200, "Maximum sequence length.")
+tf.app.flags.DEFINE_integer("max_seq_len", 100, "Maximum sequence length.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
-tf.app.flags.DEFINE_string("tokenizer", "CHAR", "Set to WORD to train word level model.")
+tf.app.flags.DEFINE_string("tokenizer", "BPE", "BPE / CHAR / WORD.")
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
 
 FLAGS = tf.app.flags.FLAGS
@@ -67,7 +68,14 @@ def create_model(session, vocab_size, forward_only):
 
 
 def get_tokenizer(FLAGS):
-  tokenizer = nlc_data.char_tokenizer if FLAGS.tokenizer.lower() == 'char' else nlc_data.basic_tokenizer
+  if FLAGS.tokenizer.lower() == 'bpe':
+    return nlc_data.bpe_tokenizer
+  elif FLAGS.tokenizer.lower() == 'char':
+    return nlc_data.char_tokenizer
+  elif FLAGS.tokenizer.lower() == 'word':
+    return nlc_data.basic_tokenizer
+  else:
+    raise
   return tokenizer
 
 
@@ -116,6 +124,7 @@ def train():
       current_step = 0
 
       ## Train
+      epoch_tic = time.time()
       for source_tokens, source_mask, target_tokens, target_mask in pair_iter(x_train, y_train, FLAGS.batch_size, FLAGS.num_layers):
         # Get a batch and make a step.
         tic = time.time()
@@ -144,6 +153,7 @@ def train():
         if current_step % FLAGS.print_every == 0:
           print('epoch %d, iter %d, cost %f, exp_cost %f, grad norm %f, param norm %f, batch time %f, length mean/std %f/%f' %
                 (epoch, current_step, cost, exp_cost / exp_length, grad_norm, param_norm, iter_time, mean_length, std_length))
+      epoch_toc = time.time()
 
       ## Checkpoint
       checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
@@ -152,7 +162,7 @@ def train():
       ## Validate
       valid_cost = validate(model, sess, x_dev, y_dev)
 
-      print("Epoch %d Validation cost: %f" % (epoch, valid_cost))
+      print("Epoch %d Validation cost: %f time: %f" % (epoch, valid_cost, epoch_toc - epoch_tic))
 
       if len(previous_losses) > 2 and valid_cost > max(previous_losses[-3:]):
         sess.run(model.learning_rate_decay_op)
