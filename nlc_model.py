@@ -36,6 +36,15 @@ from tensorflow.python.ops.math_ops import tanh
 
 import nlc_data
 
+def get_optimizer(opt):
+  if opt == "adam":
+    optfn = tf.train.AdamOptimizer
+  elif opt == "sgd":
+    optfn = tf.train.GradientDescentOptimizer
+  else:
+    assert(False)
+  return optfn
+
 class GRUCellAttn(rnn_cell.GRUCell):
   def __init__(self, num_units, encoder_output, scope=None):
     self.hs = encoder_output
@@ -58,11 +67,11 @@ class GRUCellAttn(rnn_cell.GRUCell):
       with vs.variable_scope("AttnConcat"):
         out = tf.nn.relu(rnn_cell._linear([context, gru_out], self._num_units, True, 1.0))
       self.attn_map = tf.squeeze(tf.slice(weights, [0, 0, 0], [-1, -1, 1]))
-      return (out, out) 
+      return (out, out)
 
 class NLCModel(object):
   def __init__(self, vocab_size, size, num_layers, max_gradient_norm, batch_size, learning_rate,
-               learning_rate_decay_factor, dropout, forward_only=False):
+               learning_rate_decay_factor, dropout, forward_only=False, optimizer="adam"):
 
     self.size = size
     self.vocab_size = vocab_size
@@ -95,7 +104,7 @@ class NLCModel(object):
 
     params = tf.trainable_variables()
     if not forward_only:
-      opt = tf.train.AdamOptimizer(self.learning_rate)
+      opt = get_optimizer(optimizer)(self.learning_rate)
 
       gradients = tf.gradients(self.losses, params)
       clipped_gradients, _ = tf.clip_by_global_norm(gradients, max_gradient_norm)
@@ -116,7 +125,7 @@ class NLCModel(object):
 
   def setup_encoder(self):
     self.encoder_cell = rnn_cell.GRUCell(self.size)
-    with vs.variable_scope("PryamidEncoder"):
+    with vs.variable_scope("PyramidEncoder"):
       inp = self.encoder_inputs
       mask = self.source_mask
       out = None

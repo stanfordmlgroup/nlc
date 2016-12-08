@@ -30,36 +30,28 @@ from six.moves import xrange
 import tensorflow as tf
 import csv
 import itertools
+import json
+import re
 
 import kenlm
 
 import nlc_model
 import nlc_data
 from util import pair_iter
+from util import get_tokenizer
+import subprocess
 
 # FIXME(zxie) Replace the below with just loading configuration from json file
-tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
-tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate decays by this much.")
-tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
-tf.app.flags.DEFINE_float("dropout", 0.1, "Fraction of units randomly dropped on non-recurrent connections.")
-tf.app.flags.DEFINE_integer("batch_size", 128, "Batch size to use during training.")
-tf.app.flags.DEFINE_integer("epochs", 0, "Number of epochs to train.")
 
-tf.app.flags.DEFINE_integer("size", 400, "Size of each model layer.")
-tf.app.flags.DEFINE_integer("num_layers", 3, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("max_vocab_size", 40000, "Vocabulary size limit.")
-tf.app.flags.DEFINE_integer("max_seq_len", 100, "Maximum sequence length.")
-tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
-tf.app.flags.DEFINE_string("tokenizer", "BPE", "CHAR / WORD / BPE")
-tf.app.flags.DEFINE_integer("beam_size", 8, "Size of beam.")
 tf.app.flags.DEFINE_string("lmfile", None, "arpa file of the language model.")
+tf.app.flags.DEFINE_integer("beam_size", 8, "Size of beam.")
 tf.app.flags.DEFINE_float("alpha", 0.3, "Language model relative weight.")
-
 tf.app.flags.DEFINE_boolean("sweep", False, "sweep all alpha rates with dev turned on")
 tf.app.flags.DEFINE_boolean("score", False, "generate csv with language model scores on target and generated.")
 
 FLAGS = tf.app.flags.FLAGS
+
 reverse_vocab, vocab = None, None
 lm = None
 
@@ -68,26 +60,27 @@ def create_model(session, vocab_size, forward_only):
       vocab_size, FLAGS.size, FLAGS.num_layers, FLAGS.max_gradient_norm, FLAGS.batch_size,
       FLAGS.learning_rate, FLAGS.learning_rate_decay_factor, FLAGS.dropout,
       forward_only=forward_only)
-  ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
-  if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-    print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-    model.saver.restore(session, ckpt.model_checkpoint_path)
+  ckpt_paths = [f for f in os.listdir(FLAGS.train_dir) if (re.search(r"best\.ckpt-\d+", f)\
+          and not f.endswith("meta"))]
+  assert(len(ckpt_paths) > 0)
+  ckpt_paths = sorted(ckpt_paths, key=lambda x: int(x.split("-")[-1]))
+  ckpt_path = os.path.join(FLAGS.train_dir, ckpt_paths[-1])
+  if tf.gfile.Exists(ckpt_path):
+    print("Reading model parameters from %s" % ckpt_path)
+    model.saver.restore(session, ckpt_path)
   else:
-    print("Created model with fresh parameters.")
-    session.run(tf.initialize_all_variables())
+    assert(False)
   return model
 
-
-def get_tokenizer(FLAGS):
-  tokenizer = nlc_data.char_tokenizer if FLAGS.tokenizer.lower() == 'char' else nlc_data.basic_tokenizer
-  return tokenizer
 
 def detokenize(sents, reverse_vocab):
   # TODO: bpe vs. char vs word
   def detok_sent(sent):
     outsent = ''
     for t in sent:
-      if t >= len(nlc_data._START_VOCAB):
+      ## NOTE This doesn't generate _UNK
+      #if t >= len(nlc_data._START_VOCAB):
+      if t >= len(nlc_data._START_VOCAB) - 1:
         outsent += reverse_vocab[t]
     if FLAGS.tokenizer.lower() == "bpe":
       outsent = outsent.replace(" ", "").replace("</w>", " ")
@@ -107,23 +100,36 @@ def network_score(model, sess, encoder_output, target_tokens):
 def detokenize_tgt(toks, reverse_vocab):
   outsent = ''
   for i in range(toks.shape[0]):
-    if toks[i] >= len(nlc_data._START_VOCAB) and toks[i] != nlc_data._PAD:
-      outsent += reverse_vocab[toks[i][0]]
+    t = toks[i][0]
+    ## NOTE This doesn't generate _UNK
+    #if t >= len(nlc_data._START_VOCAB) and t != nlc_data._PAD:
+    if t >= len(nlc_data._START_VOCAB) - 1 and t != nlc_data._PAD:
+      outsent += reverse_vocab[t]
   if FLAGS.tokenizer.lower() == "bpe":
     outsent = outsent.replace(" ", "").replace("</w>", " ")
   return outsent
 
 def lm_rank(strs, probs):
+  # FIXME just copied from decode.py in another branch
   if lm is None:
     return strs[0]
   a = FLAGS.alpha
-  rescores = [(1-a)*p + a*lm.score(s) for (s, p) in zip(strs, probs)]
-  rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x:x[1])]
-  return strs[rerank[-1]]
+  lmscores = [lm.score(s)/(1+len(s.split())) for s in strs]
+  probs = [ p / (len(s)+1) for (s, p) in zip(strs, probs) ]
+  #for (s, p, l) in zip(strs, probs, lmscores):
+    #print(s, p, l)
+
+  rescores = [(1 - a) * p + a * l for (l, p) in zip(lmscores, probs)]
+  rerank = [rs[0] for rs in sorted(enumerate(rescores), key=lambda x: x[1])]
+  generated = strs[rerank[-1]]
+  lm_score = lmscores[rerank[-1]]
+  nw_score = probs[rerank[-1]]
+  score = rescores[rerank[-1]]
+  return generated #, score, nw_score, lm_score
 
 def lm_rank_score(strs, probs):
+  # FIXME Update this function
   """
-
   :param strs: candidates generated by beam search
   :param target: target sentence
   :param probs:
@@ -159,7 +165,7 @@ def setup_batch_decode(sess):
   x_train, y_train, x_dev, y_dev, vocab_path = nlc_data.prepare_nlc_data(
     FLAGS.data_dir + '/' + FLAGS.tokenizer.lower(), FLAGS.max_vocab_size,
     tokenizer=get_tokenizer(FLAGS))
-  vocab, reverse_vocab = nlc_data.initialize_vocabulary(vocab_path)
+  vocab, reverse_vocab = nlc_data.initialize_vocabulary(vocab_path, bpe=(FLAGS.tokenizer.lower()=="bpe"))
   vocab_size = len(vocab)
   print("Vocabulary size: %d" % vocab_size)
 
@@ -182,7 +188,7 @@ def batch_decode(model, sess, x_dev, y_dev, alpha):
 
     count = 0
     for source_tokens, source_mask, target_tokens, target_mask in pair_iter(x_dev, y_dev, 1,
-                                                                            FLAGS.num_layers):
+                                                                            FLAGS.num_layers, sort_and_shuffle=False):
       src_sent = detokenize_tgt(source_tokens, reverse_vocab)
       tgt_sent = detokenize_tgt(target_tokens, reverse_vocab)
 
@@ -215,6 +221,7 @@ def batch_decode(model, sess, x_dev, y_dev, alpha):
         generated_lm_score.append(lm_score)
       count += 1
 
+    """
     print("outputting in csv file...")
 
     # dump it out in train_dir
@@ -226,12 +233,23 @@ def batch_decode(model, sess, x_dev, y_dev, alpha):
           wrt.writerow([s, t, g])  # source, correct target, wrong target
       else:
         for s, t, tns, tls, g, gs, gns, gls in itertools.izip(error_source, error_target, target_nw_score, target_lm_score, error_generated, generated_score, generated_nw_score, generated_lm_score):
-          wrt.writerow([s, t, tns, tls, g, gs, gns, gls]) 
+          wrt.writerow([s, t, tns, tls, g, gs, gns, gls])
+    """
 
-    print("err_val_alpha_" + str(alpha) + ".csv" + "file finished")
+    #print("err_val_alpha_" + str(alpha) + ".csv" + "file finished")
+
+    with open(FLAGS.tokenizer.lower() + "_runs" + str(FLAGS.beam_size) + "/alpha" + str(alpha) + ".txt", 'wb') as f:
+      f.write("\n".join(error_generated))
 
 
 def main(_):
+  with open(os.path.join(FLAGS.train_dir, "flags.json"), 'r') as fin:
+    json_flags = json.load(fin)
+    print("Setting flags from run:")
+    print(json_flags)
+    for key in json_flags:
+      FLAGS.__flags[key] = json_flags[key]
+
   with tf.Session() as sess:
     if FLAGS.sweep:
       alpha = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]

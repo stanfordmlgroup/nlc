@@ -23,6 +23,7 @@ import random
 import sys
 import time
 import random
+import json
 
 import numpy as np
 from six.moves import xrange
@@ -32,6 +33,10 @@ import nlc_model
 import nlc_data
 
 from util import pair_iter
+from util import get_tokenizer
+
+import logging
+logging.basicConfig(level=logging.INFO)
 
 tf.app.flags.DEFINE_float("learning_rate", 0.0003, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "Learning rate decays by this much.")
@@ -47,6 +52,7 @@ tf.app.flags.DEFINE_integer("max_seq_len", 100, "Maximum sequence length.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
 tf.app.flags.DEFINE_string("tokenizer", "BPE", "BPE / CHAR / WORD.")
+tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
 
 FLAGS = tf.app.flags.FLAGS
@@ -55,28 +61,16 @@ def create_model(session, vocab_size, forward_only):
   model = nlc_model.NLCModel(
       vocab_size, FLAGS.size, FLAGS.num_layers, FLAGS.max_gradient_norm, FLAGS.batch_size,
       FLAGS.learning_rate, FLAGS.learning_rate_decay_factor, FLAGS.dropout,
-      forward_only=forward_only)
+      forward_only=forward_only, optimizer=FLAGS.optimizer)
   ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
   if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-    print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
     model.saver.restore(session, ckpt.model_checkpoint_path)
   else:
-    print("Created model with fresh parameters.")
+    logging.info("Created model with fresh parameters.")
     session.run(tf.initialize_all_variables())
-    print('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
+    logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
   return model
-
-
-def get_tokenizer(FLAGS):
-  if FLAGS.tokenizer.lower() == 'bpe':
-    return nlc_data.bpe_tokenizer
-  elif FLAGS.tokenizer.lower() == 'char':
-    return nlc_data.char_tokenizer
-  elif FLAGS.tokenizer.lower() == 'word':
-    return nlc_data.basic_tokenizer
-  else:
-    raise
-  return tokenizer
 
 
 def validate(model, sess, x_dev, y_dev):
@@ -92,20 +86,29 @@ def validate(model, sess, x_dev, y_dev):
 def train():
   """Train a translation model using NLC data."""
   # Prepare NLC data.
-  print("Preparing NLC data in %s" % FLAGS.data_dir)
+  logging.info("Preparing NLC data in %s" % FLAGS.data_dir)
 
   x_train, y_train, x_dev, y_dev, vocab_path = nlc_data.prepare_nlc_data(
     FLAGS.data_dir + '/' + FLAGS.tokenizer.lower(), FLAGS.max_vocab_size,
     tokenizer=get_tokenizer(FLAGS))
   vocab, _ = nlc_data.initialize_vocabulary(vocab_path)
   vocab_size = len(vocab)
-  print("Vocabulary size: %d" % vocab_size)
+  logging.info("Vocabulary size: %d" % vocab_size)
+
+  if not os.path.exists(FLAGS.train_dir):
+    os.makedirs(FLAGS.train_dir)
+  file_handler = logging.FileHandler("{0}/log.txt".format(FLAGS.train_dir))
+  logging.getLogger().addHandler(file_handler)
+
+  print(vars(FLAGS))
+  with open(os.path.join(FLAGS.train_dir, "flags.json"), 'w') as fout:
+    json.dump(FLAGS.__flags, fout)
 
   with tf.Session() as sess:
-    print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
+    logging.info("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, vocab_size, False)
 
-    print('Initial validation cost: %f' % validate(model, sess, x_dev, y_dev))
+    logging.info('Initial validation cost: %f' % validate(model, sess, x_dev, y_dev))
 
     if False:
       tic = time.time()
@@ -115,6 +118,7 @@ def train():
       print ("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
 
     epoch = 0
+    best_epoch = 0
     previous_losses = []
     exp_cost = None
     exp_length = None
@@ -151,22 +155,26 @@ def train():
         cost = cost / mean_length
 
         if current_step % FLAGS.print_every == 0:
-          print('epoch %d, iter %d, cost %f, exp_cost %f, grad norm %f, param norm %f, batch time %f, length mean/std %f/%f' %
+          logging.info('epoch %d, iter %d, cost %f, exp_cost %f, grad norm %f, param norm %f, batch time %f, length mean/std %f/%f' %
                 (epoch, current_step, cost, exp_cost / exp_length, grad_norm, param_norm, iter_time, mean_length, std_length))
       epoch_toc = time.time()
 
       ## Checkpoint
-      checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
-      model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+      checkpoint_path = os.path.join(FLAGS.train_dir, "best.ckpt")
 
       ## Validate
       valid_cost = validate(model, sess, x_dev, y_dev)
 
-      print("Epoch %d Validation cost: %f time: %f" % (epoch, valid_cost, epoch_toc - epoch_tic))
+      logging.info("Epoch %d Validation cost: %f time: %f" % (epoch, valid_cost, epoch_toc - epoch_tic))
 
-      if len(previous_losses) > 2 and valid_cost > max(previous_losses[-3:]):
+      if len(previous_losses) > 2 and valid_cost > previous_losses[-1]:
+        logging.info("Annealing learning rate by %f" % FLAGS.learning_rate_decay_factor)
         sess.run(model.learning_rate_decay_op)
-      previous_losses.append(valid_cost)
+        model.saver.restore(sess, checkpoint_path + ("-%d" % best_epoch))
+      else:
+        previous_losses.append(valid_cost)
+        best_epoch = epoch
+        model.saver.save(sess, checkpoint_path, global_step=epoch)
       sys.stdout.flush()
 
 def main(_):
