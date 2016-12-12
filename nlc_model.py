@@ -220,8 +220,15 @@ class NLCModel(object):
 
       return [time + 1, next_beam_probs, next_beam_seqs, next_cand_probs, next_cand_seqs] + next_states
 
-    loop_vars = [time_0, beam_probs_0, beam_seqs_0, cand_probs_0, cand_seqs_0] + states_0
-    ret_vars = tf.while_loop(cond=beam_cond, body=beam_step, loop_vars=loop_vars, back_prop=False)
+    var_shape = []
+    var_shape.append((time_0, time_0.get_shape()))
+    var_shape.append((beam_probs_0, tf.TensorShape([None,])))
+    var_shape.append((beam_seqs_0, tf.TensorShape([None, None])))
+    var_shape.append((cand_probs_0, tf.TensorShape([None,])))
+    var_shape.append((cand_seqs_0, tf.TensorShape([None, None])))
+    var_shape.extend([(state_0, tf.TensorShape([None, self.size])) for state_0 in states_0])
+    loop_vars, loop_var_shapes = zip(* var_shape)
+    ret_vars = tf.while_loop(cond=beam_cond, body=beam_step, loop_vars=loop_vars, shape_invariants=loop_var_shapes, back_prop=False)
 #    time, beam_probs, beam_seqs, cand_probs, cand_seqs, _ = ret_vars
     cand_seqs = ret_vars[4]
     cand_probs = ret_vars[3]
