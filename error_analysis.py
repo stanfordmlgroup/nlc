@@ -164,7 +164,7 @@ def setup_batch_decode(sess):
 
   x_train, y_train, x_dev, y_dev, vocab_path = nlc_data.prepare_nlc_data(
     FLAGS.data_dir + '/' + FLAGS.tokenizer.lower(), FLAGS.max_vocab_size,
-    tokenizer=get_tokenizer(FLAGS))
+    tokenizer=get_tokenizer(FLAGS), other_dev_path="/deep/group/nlp_data/nlc_data/ourdev/bpe")
   vocab, reverse_vocab = nlc_data.initialize_vocabulary(vocab_path, bpe=(FLAGS.tokenizer.lower()=="bpe"))
   vocab_size = len(vocab)
   print("Vocabulary size: %d" % vocab_size)

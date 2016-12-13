@@ -125,7 +125,7 @@ class NLCModel(object):
 
   def setup_encoder(self):
     self.encoder_cell = rnn_cell.GRUCell(self.size)
-    with vs.variable_scope("PyramidEncoder"):
+    with vs.variable_scope("PryamidEncoder"):
       inp = self.encoder_inputs
       mask = self.source_mask
       out = None
