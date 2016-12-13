@@ -33,6 +33,7 @@ import kenlm
 
 import nlc_model
 import nlc_data
+from util import get_tokenizer
 
 import cPickle as pickle
 from collections import defaultdict
@@ -74,11 +75,6 @@ def create_model(session, vocab_size, forward_only):
     print("Created model with fresh parameters.")
     session.run(tf.initialize_all_variables())
   return model
-
-
-def get_tokenizer(FLAGS):
-  tokenizer = nlc_data.char_tokenizer if FLAGS.tokenizer.lower() == 'char' else nlc_data.basic_tokenizer
-  return tokenizer
 
 
 def tokenize(sent, vocab, depth=FLAGS.num_layers):

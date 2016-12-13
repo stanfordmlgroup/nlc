@@ -36,6 +36,15 @@ from tensorflow.python.ops.math_ops import tanh
 
 import nlc_data
 
+def get_optimizer(opt):
+  if opt == "adam":
+    optfn = tf.train.AdamOptimizer
+  elif opt == "sgd":
+    optfn = tf.train.GradientDescentOptimizer
+  else:
+    assert(False)
+  return optfn
+
 class GRUCellAttn(rnn_cell.GRUCell):
   def __init__(self, num_units, encoder_output, scope=None):
     self.hs = encoder_output
@@ -58,11 +67,11 @@ class GRUCellAttn(rnn_cell.GRUCell):
       with vs.variable_scope("AttnConcat"):
         out = tf.nn.relu(rnn_cell._linear([context, gru_out], self._num_units, True, 1.0))
       self.attn_map = tf.squeeze(tf.slice(weights, [0, 0, 0], [-1, -1, 1]))
-      return (out, out) 
+      return (out, out)
 
 class NLCModel(object):
   def __init__(self, vocab_size, size, num_layers, max_gradient_norm, batch_size, learning_rate,
-               learning_rate_decay_factor, dropout, forward_only=False):
+               learning_rate_decay_factor, dropout, forward_only=False, optimizer="adam"):
 
     self.size = size
     self.vocab_size = vocab_size
@@ -95,7 +104,7 @@ class NLCModel(object):
 
     params = tf.trainable_variables()
     if not forward_only:
-      opt = tf.train.AdamOptimizer(self.learning_rate)
+      opt = get_optimizer(optimizer)(self.learning_rate)
 
       gradients = tf.gradients(self.losses, params)
       clipped_gradients, _ = tf.clip_by_global_norm(gradients, max_gradient_norm)
@@ -220,8 +229,15 @@ class NLCModel(object):
 
       return [time + 1, next_beam_probs, next_beam_seqs, next_cand_probs, next_cand_seqs] + next_states
 
-    loop_vars = [time_0, beam_probs_0, beam_seqs_0, cand_probs_0, cand_seqs_0] + states_0
-    ret_vars = tf.while_loop(cond=beam_cond, body=beam_step, loop_vars=loop_vars, back_prop=False)
+    var_shape = []
+    var_shape.append((time_0, time_0.get_shape()))
+    var_shape.append((beam_probs_0, tf.TensorShape([None,])))
+    var_shape.append((beam_seqs_0, tf.TensorShape([None, None])))
+    var_shape.append((cand_probs_0, tf.TensorShape([None,])))
+    var_shape.append((cand_seqs_0, tf.TensorShape([None, None])))
+    var_shape.extend([(state_0, tf.TensorShape([None, self.size])) for state_0 in states_0])
+    loop_vars, loop_var_shapes = zip(* var_shape)
+    ret_vars = tf.while_loop(cond=beam_cond, body=beam_step, loop_vars=loop_vars, shape_invariants=loop_var_shapes, back_prop=False)
 #    time, beam_probs, beam_seqs, cand_probs, cand_seqs, _ = ret_vars
     cand_seqs = ret_vars[4]
     cand_probs = ret_vars[3]
