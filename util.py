@@ -29,13 +29,13 @@ FLAGS = tf.app.flags.FLAGS
 def tokenize(string):
   return [int(s) for s in string.split()]
 
-def pair_iter(fnamex, fnamey, batch_size, num_layers):
+def pair_iter(fnamex, fnamey, batch_size, num_layers, sort_and_shuffle=True):
   fdx, fdy = open(fnamex), open(fnamey)
   batches = []
 
   while True:
     if len(batches) == 0:
-      refill(batches, fdx, fdy, batch_size)
+      refill(batches, fdx, fdy, batch_size, sort_and_shuffle=sort_and_shuffle)
     if len(batches) == 0:
       break
 
@@ -52,7 +52,7 @@ def pair_iter(fnamex, fnamey, batch_size, num_layers):
 
   return
 
-def refill(batches, fdx, fdy, batch_size):
+def refill(batches, fdx, fdy, batch_size, sort_and_shuffle=True):
   line_pairs = []
   linex, liney = fdx.readline(), fdy.readline()
 
@@ -65,7 +65,8 @@ def refill(batches, fdx, fdy, batch_size):
       break
     linex, liney = fdx.readline(), fdy.readline()
 
-  line_pairs = sorted(line_pairs, key=lambda e: len(e[0]))
+  if sort_and_shuffle:
+    line_pairs = sorted(line_pairs, key=lambda e: len(e[0]))
 
   for batch_start in xrange(0, len(line_pairs), batch_size):
     x_batch, y_batch = zip(*line_pairs[batch_start:batch_start+batch_size])
@@ -73,7 +74,8 @@ def refill(batches, fdx, fdy, batch_size):
 #      break
     batches.append((x_batch, y_batch))
 
-  random.shuffle(batches)
+  if sort_and_shuffle:
+    random.shuffle(batches)
   return
 
 def add_sos_eos(tokens):
@@ -84,3 +86,16 @@ def padded(tokens, depth):
   align = pow(2, depth - 1)
   padlen = maxlen + (align - maxlen) % align
   return map(lambda token_list: token_list + [nlc_data.PAD_ID] * (padlen - len(token_list)), tokens)
+
+
+def get_tokenizer(flags):
+  if flags.tokenizer.lower() == 'bpe':
+    return nlc_data.bpe_tokenizer
+  elif flags.tokenizer.lower() == 'char':
+    return nlc_data.char_tokenizer
+  elif flags.tokenizer.lower() == 'word':
+    return nlc_data.basic_tokenizer
+  else:
+    raise
+  return tokenizer
+
