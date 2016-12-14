@@ -36,7 +36,7 @@ def score_and_plot(ngram_outputs_dir, nlm_outputs_dir, plot_file):
   for d in [ngram_outputs_dir, nlm_outputs_dir]:
     for a in ALPHAS.split(','):
       sents_file = os.path.join(d, "alpha%s.txt" % a)
-      cmd = "perl %s %s < %s" % (MULTIBLEU, sents_file, TGT_FILE)
+      cmd = "perl %s %s < %s" % (MULTIBLEU, TGT_FILE, sents_file)
       print(cmd)
       output = check_output(cmd, shell=True)
       score = float(output.split(',')[0].split(" = ")[1])
