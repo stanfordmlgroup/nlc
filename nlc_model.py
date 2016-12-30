@@ -62,7 +62,7 @@ class GRUCellAttn(rnn_cell.GRUCell):
 
 class NLCModel(object):
   def __init__(self, vocab_size, size, num_layers, max_gradient_norm, batch_size, learning_rate,
-               learning_rate_decay_factor, dropout, forward_only=False):
+               learning_rate_decay_factor, dropout, FLAGS, forward_only=False):
 
     self.size = size
     self.vocab_size = vocab_size
@@ -80,6 +80,8 @@ class NLCModel(object):
     self.target_mask = tf.placeholder(tf.int32, shape=[None, None])
     self.beam_size = tf.placeholder(tf.int32)
     self.target_length = tf.reduce_sum(self.target_mask, reduction_indices=0)
+
+    self.FLAGS = FLAGS
 
     self.decoder_state_input, self.decoder_state_output = [], []
     for i in xrange(num_layers):
@@ -105,7 +107,7 @@ class NLCModel(object):
       self.updates = opt.apply_gradients(
         zip(clipped_gradients, params), global_step=self.global_step)
 
-    self.saver = tf.train.Saver(tf.all_variables(), max_to_keep=0)
+    self.saver = tf.train.Saver(tf.all_variables(), max_to_keep=FLAGS.keep)
 
   def setup_embeddings(self):
     with vs.variable_scope("embeddings"):
