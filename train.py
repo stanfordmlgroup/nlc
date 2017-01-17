@@ -51,7 +51,7 @@ tf.app.flags.DEFINE_integer("max_vocab_size", 40000, "Vocabulary size limit.")
 tf.app.flags.DEFINE_integer("max_seq_len", 100, "Maximum sequence length.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
-tf.app.flags.DEFINE_string("tokenizer", "BPE", "BPE / CHAR / WORD.")
+tf.app.flags.DEFINE_string("tokenizer", "CHAR", "BPE / CHAR / WORD.")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
 
@@ -123,6 +123,8 @@ def train():
     exp_cost = None
     exp_length = None
     exp_norm = None
+    total_iters = 0
+    start_time = time.time()
     while (FLAGS.epochs == 0 or epoch < FLAGS.epochs):
       epoch += 1
       current_step = 0
@@ -137,6 +139,8 @@ def train():
 
         toc = time.time()
         iter_time = toc - tic
+        total_iters += np.sum(target_mask)
+        tps = total_iters / (time.time() - start_time)
         current_step += 1
 
         lengths = np.sum(target_mask, axis=0)
@@ -155,8 +159,8 @@ def train():
         cost = cost / mean_length
 
         if current_step % FLAGS.print_every == 0:
-          logging.info('epoch %d, iter %d, cost %f, exp_cost %f, grad norm %f, param norm %f, batch time %f, length mean/std %f/%f' %
-                (epoch, current_step, cost, exp_cost / exp_length, grad_norm, param_norm, iter_time, mean_length, std_length))
+          logging.info('epoch %d, iter %d, cost %f, exp_cost %f, grad norm %f, param norm %f, tps %f, length mean/std %f/%f' %
+                (epoch, current_step, cost, exp_cost / exp_length, grad_norm, param_norm, tps, mean_length, std_length))
       epoch_toc = time.time()
 
       ## Checkpoint
